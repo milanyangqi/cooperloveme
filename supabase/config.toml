@@ -1,0 +1,16 @@
+project_id = "youtube-language-lab"
+
+[functions.me]
+verify_jwt = false
+
+[functions.billing-checkout]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.auth-callback]
+verify_jwt = false
+
+[functions.admin]
+verify_jwt = false

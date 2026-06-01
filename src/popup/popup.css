@@ -1,0 +1,213 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0c0d0e;
+  color: #f7f8f8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 360px;
+  min-height: 520px;
+  background: #0c0d0e;
+}
+
+button {
+  font: inherit;
+}
+
+.popup {
+  padding: 16px;
+}
+
+.popup-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.popup-header h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.popup-header p {
+  margin: 6px 0 0;
+  color: #a3aab5;
+  font-size: 12px;
+}
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #191c1f;
+  color: #f7f8f8;
+  cursor: pointer;
+}
+
+.hero-panel,
+.account-card,
+.quota-card,
+.stats,
+.settings-link {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #151719;
+}
+
+.hero-panel {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  margin-top: 16px;
+}
+
+.hero-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffc857;
+  color: #211700;
+}
+
+.hero-panel strong,
+.account-card strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.hero-panel span,
+.account-card p,
+.label {
+  color: #a3aab5;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.action-grid button,
+.settings-link {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  background: #ffc857;
+  color: #211700;
+  font-weight: 760;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.action-grid button:nth-child(2) {
+  background: #57d6a4;
+  color: #062217;
+}
+
+.account-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.plan {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 200, 87, 0.15);
+  color: #ffc857;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.quota-card {
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 760;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.quota-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  color: #a3aab5;
+  font-size: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.quota-row strong {
+  color: #f7f8f8;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.stats div {
+  padding: 12px;
+  text-align: center;
+}
+
+.stats div + div {
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stats strong,
+.stats span {
+  display: block;
+}
+
+.stats strong {
+  font-size: 20px;
+}
+
+.stats span {
+  color: #a3aab5;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.settings-link {
+  width: 100%;
+  margin-top: 12px;
+  background: #202326;
+  color: #f7f8f8;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}

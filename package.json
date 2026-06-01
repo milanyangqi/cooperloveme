@@ -1,0 +1,27 @@
+{
+  "name": "youtube-language-lab-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A YouTube-first language learning browser extension with subtitles, practice mode, local library, and V2-ready account entitlements.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build && vite build --config vite.content.config.ts && find dist -name .DS_Store -delete",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^25.9.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^6.0.2",
+    "vite": "^8.0.15"
+  }
+}

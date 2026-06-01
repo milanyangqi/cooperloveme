@@ -339,8 +339,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.20 最新在上</strong>
-          <p>安装和打开插件不会访问 YouTube。点击按钮才会读取当前视频官方字幕。</p>
+          <strong>0.1.21 自动面板</strong>
+          <p>打开 YouTube 视频页会自动加载轻量字幕面板；按钮仍保留用于手动诊断。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

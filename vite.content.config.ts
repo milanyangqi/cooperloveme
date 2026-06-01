@@ -12,7 +12,7 @@ export default defineConfig({
     emptyOutDir: false,
     sourcemap: true,
     lib: {
-      entry: resolve(__dirname, "src/content/index.tsx"),
+      entry: resolve(__dirname, "src/content/safeAutoload.ts"),
       name: "YouTubeLanguageLabContent",
       formats: ["iife"],
       fileName: () => "assets/content.js"

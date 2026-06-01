@@ -27,8 +27,10 @@ const PANEL_ID = "yll-safe-panel";
 const STATUS_ID = "yll-safe-status";
 const LIST_ID = "yll-safe-list";
 const STYLE_ID = "yll-safe-style";
+const OVERLAY_ID = "yll-safe-overlay";
 const POLL_MS = 500;
 const MAX_VISIBLE_ROWS = 260;
+const DEFAULT_DISPLAY_LEAD_MS = 350;
 
 const runtime = window as typeof window & {
   __yllSafeTimer?: number;
@@ -143,6 +145,32 @@ function installStyle() {
       overflow-wrap: anywhere;
       font-weight: 650;
     }
+    #${OVERLAY_ID} {
+      position: fixed;
+      z-index: 2147483646;
+      left: 50%;
+      bottom: 72px;
+      transform: translateX(-50%);
+      max-width: min(860px, 72vw);
+      padding: 8px 12px;
+      color: #fff;
+      background: rgba(0,0,0,.78);
+      border-radius: 6px;
+      text-align: center;
+      font: 700 24px/1.32 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-shadow: 0 1px 2px rgba(0,0,0,.7);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .12s ease;
+    }
+    #${OVERLAY_ID}.is-visible { opacity: 1; }
+    html.yll-hide-native-captions .ytp-caption-window-container,
+    html.yll-hide-native-captions .caption-window,
+    html.yll-hide-native-captions .ytp-caption-segment {
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
   `;
   document.documentElement.appendChild(style);
 }
@@ -176,6 +204,42 @@ function mountPanel() {
 function setStatus(text: string) {
   const status = document.getElementById(STATUS_ID);
   if (status) status.textContent = text;
+}
+
+function mountOverlay() {
+  let overlay = document.getElementById(OVERLAY_ID);
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = OVERLAY_ID;
+  document.documentElement.appendChild(overlay);
+  document.documentElement.classList.add("yll-hide-native-captions");
+  return overlay;
+}
+
+function positionOverlay() {
+  const overlay = document.getElementById(OVERLAY_ID);
+  const video = document.querySelector("video");
+  if (!overlay || !video) return;
+  const rect = video.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    overlay.classList.remove("is-visible");
+    return;
+  }
+  overlay.style.left = `${rect.left + rect.width / 2}px`;
+  overlay.style.bottom = `${Math.max(18, window.innerHeight - rect.bottom + Math.min(80, rect.height * 0.11))}px`;
+  overlay.style.maxWidth = `${Math.max(280, Math.min(rect.width * 0.86, 980))}px`;
+}
+
+function setOverlayCue(cue?: LabCue) {
+  const overlay = mountOverlay();
+  positionOverlay();
+  if (!cue?.text) {
+    overlay.textContent = "";
+    overlay.classList.remove("is-visible");
+    return;
+  }
+  overlay.textContent = cue.text;
+  overlay.classList.add("is-visible");
 }
 
 function renderRows(rows: LabCue[]) {
@@ -212,13 +276,17 @@ function updateActiveCue() {
   const list = document.getElementById(LIST_ID);
   if (!rows.length || !video || !list) return;
 
-  const currentMs = video.currentTime * 1000;
+  const currentMs = (video.currentTime * 1000) + DEFAULT_DISPLAY_LEAD_MS;
   const active =
     rows.find((cue) => currentMs >= cue.startMs - 250 && currentMs <= cue.startMs + cue.durationMs + 250) ??
     [...rows].reverse().find((cue) => cue.startMs <= currentMs);
-  if (!active) return;
+  if (!active) {
+    setOverlayCue(undefined);
+    return;
+  }
 
   const nextKey = cueKey(active);
+  setOverlayCue(active);
   if (nextKey === runtime.__yllSafeActiveKey) return;
   runtime.__yllSafeActiveKey = nextKey;
 
@@ -409,12 +477,16 @@ function captureVisibleFallback() {
 function tick() {
   if (!isWatchPage()) {
     document.getElementById(PANEL_ID)?.remove();
+    document.getElementById(OVERLAY_ID)?.remove();
+    document.documentElement.classList.remove("yll-hide-native-captions");
     runtime.__yllSafeLoadedVideoId = undefined;
     runtime.__yllSafeRows = [];
     return;
   }
 
   mountPanel();
+  mountOverlay();
+  positionOverlay();
   if (runtime.__yllSafeLastHref !== location.href) {
     runtime.__yllSafeLastHref = location.href;
     runtime.__yllSafeLoadedVideoId = undefined;

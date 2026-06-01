@@ -339,8 +339,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.21 自动面板</strong>
-          <p>打开 YouTube 视频页会自动加载轻量字幕面板；按钮仍保留用于手动诊断。</p>
+          <strong>0.1.22 底部字幕</strong>
+          <p>视频页自动加载右侧面板和插件底部字幕，并默认隐藏 YouTube 原生字幕。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

@@ -2,7 +2,7 @@ type LabCue = {
   startMs: number;
   durationMs: number;
   text: string;
-  source: "official" | "text-track" | "visible";
+  source: "official" | "text-track" | "timedtext" | "visible";
 };
 
 type RawCaptionTrack = {
@@ -38,6 +38,9 @@ const runtime = window as typeof window & {
   __yllSafeRows?: LabCue[];
   __yllSafeActiveKey?: string;
   __yllSafeLoadedVideoId?: string;
+  __yllSafeIsLoadingOfficial?: boolean;
+  __yllSafeCanUseVisibleFallback?: boolean;
+  __yllSafeLastFailure?: string;
 };
 
 function isWatchPage() {
@@ -52,6 +55,40 @@ function cleanText(value: string) {
   const textarea = document.createElement("textarea");
   textarea.innerHTML = value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   return textarea.value.trim();
+}
+
+function uniqueAdjacentWords(text: string) {
+  const words = cleanText(text).split(" ").filter(Boolean);
+  if (words.length < 4) return words.join(" ");
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false;
+    const next: string[] = [];
+    for (let index = 0; index < words.length;) {
+      let repeatedSize = 0;
+      const maxSize = Math.min(14, Math.floor((words.length - index) / 2));
+      for (let size = maxSize; size >= 1; size -= 1) {
+        const first = words.slice(index, index + size).join(" ").toLowerCase();
+        const second = words.slice(index + size, index + size * 2).join(" ").toLowerCase();
+        if (first === second) {
+          repeatedSize = size;
+          break;
+        }
+      }
+      if (repeatedSize > 0) {
+        next.push(...words.slice(index, index + repeatedSize));
+        index += repeatedSize * 2;
+        changed = true;
+      } else {
+        next.push(words[index]);
+        index += 1;
+      }
+    }
+    words.splice(0, words.length, ...next);
+    if (!changed) break;
+  }
+
+  return words.join(" ");
 }
 
 function escapeHtml(text: string) {
@@ -69,6 +106,33 @@ function formatClock(ms: number) {
 
 function cueKey(cue: LabCue) {
   return `${Math.round(cue.startMs / 100)}:${cue.text.toLowerCase()}`;
+}
+
+function normalizeForCompare(text: string) {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+}
+
+function compactRepeatedPhrases(text: string) {
+  const cleaned = uniqueAdjacentWords(text)
+    .replace(/\s*([,.!?;:])\s*/g, "$1 ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = cleaned
+    .split(/(?<=[.!?])\s+|(?=\s[-–—]\s)|\s(?=[A-Z][a-z]+(?:\s|$))/)
+    .map((part) => cleanText(part))
+    .filter(Boolean);
+  if (parts.length <= 1) return cleaned;
+
+  const seen = new Set<string>();
+  const compacted: string[] = [];
+  for (const part of parts) {
+    const key = normalizeForCompare(part);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    compacted.push(part);
+  }
+
+  return uniqueAdjacentWords(compacted.join(" "));
 }
 
 function installStyle() {
@@ -212,7 +276,6 @@ function mountOverlay() {
   overlay = document.createElement("div");
   overlay.id = OVERLAY_ID;
   document.documentElement.appendChild(overlay);
-  document.documentElement.classList.add("yll-hide-native-captions");
   return overlay;
 }
 
@@ -286,7 +349,11 @@ function updateActiveCue() {
   }
 
   const nextKey = cueKey(active);
-  setOverlayCue(active);
+  if (active.source === "visible") {
+    setOverlayCue(undefined);
+  } else {
+    setOverlayCue(active);
+  }
   if (nextKey === runtime.__yllSafeActiveKey) return;
   runtime.__yllSafeActiveKey = nextKey;
 
@@ -303,21 +370,62 @@ function saveRows(rows: LabCue[], sourceLabel: string) {
     unique.set(cueKey(cue), cue);
   }
   runtime.__yllSafeRows = Array.from(unique.values());
+  const shouldHideNativeCaptions = runtime.__yllSafeRows.some((cue) => cue.source !== "visible");
+  document.documentElement.classList.toggle("yll-hide-native-captions", shouldHideNativeCaptions);
   renderRows(runtime.__yllSafeRows);
   setStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕，来源：${sourceLabel}。`);
   updateActiveCue();
+}
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" ? error : "未知错误";
 }
 
 function parsePlayerResponseFromScripts() {
   for (const script of Array.from(document.scripts)) {
     const text = script.textContent ?? "";
     if (!text.includes("ytInitialPlayerResponse")) continue;
-    const match = text.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*(?:var\s+meta|var\s+head|<\/script>|$)/s);
-    if (!match?.[1]) continue;
+    const json = extractJsonObjectAfterMarker(text, "ytInitialPlayerResponse");
+    if (!json) continue;
     try {
-      return JSON.parse(match[1]) as PlayerResponse;
+      return JSON.parse(json) as PlayerResponse;
     } catch {
       continue;
+    }
+  }
+  return undefined;
+}
+
+function extractJsonObjectAfterMarker(text: string, marker: string) {
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return undefined;
+  const equalsIndex = text.indexOf("=", markerIndex);
+  const start = text.indexOf("{", equalsIndex >= 0 ? equalsIndex : markerIndex);
+  if (start < 0) return undefined;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
     }
   }
   return undefined;
@@ -328,9 +436,9 @@ async function fetchPlayerResponseFromPage() {
     const response = await fetch(location.href, { credentials: "include", cache: "no-store" });
     if (!response.ok) return undefined;
     const html = await response.text();
-    const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*(?:var\s+meta|var\s+head|<\/script>|$)/s);
-    if (!match?.[1]) return undefined;
-    return JSON.parse(match[1]) as PlayerResponse;
+    const json = extractJsonObjectAfterMarker(html, "ytInitialPlayerResponse");
+    if (!json) return undefined;
+    return JSON.parse(json) as PlayerResponse;
   } catch {
     return undefined;
   }
@@ -355,7 +463,7 @@ async function loadOfficialRows(videoId: string) {
   const baseUrl = track?.baseUrl ?? track?.base_url ?? track?.url;
   if (!track || !baseUrl) return [];
 
-  const url = new URL(baseUrl);
+  const url = new URL(baseUrl, location.href);
   if (!url.searchParams.get("fmt")) url.searchParams.set("fmt", "json3");
   const response = await fetch(url.toString(), { credentials: "include", cache: "no-store" });
   if (!response.ok) return [];
@@ -376,6 +484,48 @@ async function loadOfficialRows(videoId: string) {
     .filter(Boolean)
     .map((cue) => cue as LabCue & { language?: string })
     .filter((cue) => cue.text && videoId && language);
+}
+
+function parseJson3Rows(videoId: string, data: { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> }, source: LabCue["source"]) {
+  return (data.events ?? [])
+    .map((event) => {
+      const text = cleanText((event.segs ?? []).map((seg) => seg.utf8 ?? "").join(""));
+      if (!text || event.tStartMs === undefined) return undefined;
+      return {
+        startMs: event.tStartMs,
+        durationMs: Math.max(500, event.dDurationMs ?? 1800),
+        text,
+        source
+      };
+    })
+    .filter(Boolean)
+    .map((cue) => cue as LabCue)
+    .filter((cue) => cue.text && videoId);
+}
+
+async function loadDirectTimedTextRows(videoId: string) {
+  const languageCandidates = ["en", "en-US"];
+  for (const languageCode of languageCandidates) {
+    for (const kind of [undefined, "asr"] as const) {
+      const url = new URL("https://www.youtube.com/api/timedtext");
+      url.searchParams.set("v", videoId);
+      url.searchParams.set("lang", languageCode);
+      url.searchParams.set("fmt", "json3");
+      if (kind) url.searchParams.set("kind", kind);
+
+      try {
+        const response = await fetch(url.toString(), { credentials: "include", cache: "no-store" });
+        if (!response.ok) continue;
+        const text = await response.text();
+        if (!text.trim()) continue;
+        const rows = parseJson3Rows(videoId, JSON.parse(text), "timedtext");
+        if (rows.length) return rows;
+      } catch {
+        continue;
+      }
+    }
+  }
+  return [];
 }
 
 function readTextTrackRows() {
@@ -408,21 +558,32 @@ function readTextTrackRows() {
 }
 
 function readVisibleCaptionCue() {
-  const selectors = [
-    ".ytp-caption-window-container .ytp-caption-segment",
-    ".ytp-caption-window-container .captions-text",
-    ".caption-window .ytp-caption-segment",
-    ".caption-window .captions-text",
-    ".ytp-caption-segment"
-  ];
-  const text = cleanText(selectors
-    .flatMap((selector) => Array.from(document.querySelectorAll<HTMLElement>(selector)))
-    .filter((element) => {
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+  const isVisible = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  };
+  const captionRoots = Array.from(document.querySelectorAll<HTMLElement>(".ytp-caption-window-container .caption-window, .caption-window"))
+    .filter(isVisible);
+  const texts = captionRoots.length
+    ? captionRoots.flatMap((root) => {
+      const segments = Array.from(root.querySelectorAll<HTMLElement>(".ytp-caption-segment")).filter(isVisible);
+      if (segments.length) return [segments.map((segment) => segment.innerText || segment.textContent || "").join(" ")];
+      return [root.innerText || root.textContent || ""];
     })
-    .map((element) => element.innerText || element.textContent || "")
+    : [Array.from(document.querySelectorAll<HTMLElement>(".ytp-caption-window-container .ytp-caption-segment, .ytp-caption-segment"))
+      .filter(isVisible)
+      .map((element) => element.innerText || element.textContent || "")
+      .join(" ")];
+  const seen = new Set<string>();
+  const text = compactRepeatedPhrases(texts
+    .map(cleanText)
+    .filter((item) => {
+      const key = normalizeForCompare(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .join(" "));
 
   const video = document.querySelector("video");
@@ -439,61 +600,128 @@ async function loadRowsForCurrentVideo() {
   const videoId = getVideoId();
   if (!videoId || runtime.__yllSafeLoadedVideoId === videoId) return;
   runtime.__yllSafeLoadedVideoId = videoId;
+  runtime.__yllSafeIsLoadingOfficial = true;
+  runtime.__yllSafeCanUseVisibleFallback = false;
+  runtime.__yllSafeLastFailure = undefined;
   runtime.__yllSafeRows = [];
   runtime.__yllSafeActiveKey = undefined;
+  document.documentElement.classList.remove("yll-hide-native-captions");
   renderRows([]);
   setStatus("正在读取官方字幕轨道...");
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const officialRows = await loadOfficialRows(videoId);
-    if (officialRows.length) {
-      saveRows(officialRows, "官方字幕轨道");
-      return;
+    setStatus(`正在读取官方字幕轨道... ${attempt + 1}/8`);
+    try {
+      const officialRows = await loadOfficialRows(videoId);
+      if (officialRows.length) {
+        saveRows(officialRows, "官方字幕轨道");
+        runtime.__yllSafeIsLoadingOfficial = false;
+        return;
+      }
+    } catch (error) {
+      runtime.__yllSafeLastFailure = `official: ${toErrorMessage(error)}`;
     }
 
-    const textTrackRows = readTextTrackRows();
-    if (textTrackRows.length) {
-      saveRows(textTrackRows, "video.textTracks");
-      return;
+    try {
+      const textTrackRows = readTextTrackRows();
+      if (textTrackRows.length) {
+        saveRows(textTrackRows, "video.textTracks");
+        runtime.__yllSafeIsLoadingOfficial = false;
+        return;
+      }
+    } catch (error) {
+      runtime.__yllSafeLastFailure = `textTracks: ${toErrorMessage(error)}`;
+    }
+
+    try {
+      const directRows = await loadDirectTimedTextRows(videoId);
+      if (directRows.length) {
+        saveRows(directRows, "YouTube timedtext");
+        runtime.__yllSafeIsLoadingOfficial = false;
+        return;
+      }
+    } catch (error) {
+      runtime.__yllSafeLastFailure = `timedtext: ${toErrorMessage(error)}`;
     }
 
     await new Promise((resolve) => window.setTimeout(resolve, 600));
   }
 
-  setStatus("官方字幕暂未读到，正在从画面字幕采集...");
+  runtime.__yllSafeIsLoadingOfficial = false;
+  runtime.__yllSafeCanUseVisibleFallback = true;
+  document.documentElement.classList.remove("yll-hide-native-captions");
+  setStatus(`官方字幕暂未读到，若页面已有 CC 文本将临时采集。${runtime.__yllSafeLastFailure ? `最近错误：${runtime.__yllSafeLastFailure}` : ""}`);
 }
 
 function captureVisibleFallback() {
+  if (runtime.__yllSafeIsLoadingOfficial || !runtime.__yllSafeCanUseVisibleFallback) return;
   if ((runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible")) return;
   const cue = readVisibleCaptionCue();
   if (!cue) return;
+  setOverlayCue(undefined);
   const rows = runtime.__yllSafeRows ?? [];
-  if (rows.some((row) => row.text === cue.text && Math.abs(row.startMs - cue.startMs) < 1200)) return;
+  cue.text = compactRepeatedPhrases(cue.text);
+  const normalizedCue = normalizeForCompare(cue.text);
+  let recentSimilarIndex = -1;
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    const normalizedRow = normalizeForCompare(row.text);
+    const nearby = Math.abs(row.startMs - cue.startMs) < 6000;
+    const overlap = normalizedRow && normalizedCue && (normalizedRow === normalizedCue || normalizedRow.includes(normalizedCue) || normalizedCue.includes(normalizedRow));
+    if (nearby && overlap) {
+      recentSimilarIndex = index;
+      break;
+    }
+  }
+  if (recentSimilarIndex >= 0) {
+    rows[recentSimilarIndex] = cue.text.length > rows[recentSimilarIndex].text.length ? cue : rows[recentSimilarIndex];
+    runtime.__yllSafeRows = rows.slice(-MAX_VISIBLE_ROWS);
+    renderRows(runtime.__yllSafeRows);
+    return;
+  }
   runtime.__yllSafeRows = [...rows, cue].slice(-MAX_VISIBLE_ROWS);
   renderRows(runtime.__yllSafeRows);
-  setStatus(`已采集 ${runtime.__yllSafeRows.length} 条画面字幕，官方字幕仍在重试。`);
+  setStatus(`已临时采集 ${runtime.__yllSafeRows.length} 条页面字幕；仍建议优先使用官方字幕轨。`);
 }
 
 function tick() {
-  if (!isWatchPage()) {
-    document.getElementById(PANEL_ID)?.remove();
-    document.getElementById(OVERLAY_ID)?.remove();
-    document.documentElement.classList.remove("yll-hide-native-captions");
-    runtime.__yllSafeLoadedVideoId = undefined;
-    runtime.__yllSafeRows = [];
-    return;
-  }
+  try {
+    if (!isWatchPage()) {
+      document.getElementById(PANEL_ID)?.remove();
+      document.getElementById(OVERLAY_ID)?.remove();
+      document.documentElement.classList.remove("yll-hide-native-captions");
+      runtime.__yllSafeLoadedVideoId = undefined;
+      runtime.__yllSafeIsLoadingOfficial = false;
+      runtime.__yllSafeCanUseVisibleFallback = false;
+      runtime.__yllSafeRows = [];
+      return;
+    }
 
-  mountPanel();
-  mountOverlay();
-  positionOverlay();
-  if (runtime.__yllSafeLastHref !== location.href) {
-    runtime.__yllSafeLastHref = location.href;
-    runtime.__yllSafeLoadedVideoId = undefined;
+    mountPanel();
+    mountOverlay();
+    positionOverlay();
+    if (runtime.__yllSafeLastHref !== location.href) {
+      runtime.__yllSafeLastHref = location.href;
+      runtime.__yllSafeLoadedVideoId = undefined;
+      runtime.__yllSafeIsLoadingOfficial = false;
+      runtime.__yllSafeCanUseVisibleFallback = false;
+    }
+    void loadRowsForCurrentVideo().catch((error) => {
+      runtime.__yllSafeIsLoadingOfficial = false;
+      runtime.__yllSafeCanUseVisibleFallback = true;
+      document.documentElement.classList.remove("yll-hide-native-captions");
+      setStatus(`字幕读取任务异常：${toErrorMessage(error)}`);
+    });
+    captureVisibleFallback();
+    if ((runtime.__yllSafeRows ?? []).some((cue) => cue.source === "visible") && !(runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible")) {
+      setOverlayCue(undefined);
+    }
+    updateActiveCue();
+  } catch (error) {
+    mountPanel();
+    document.documentElement.classList.remove("yll-hide-native-captions");
+    setStatus(`面板运行异常：${toErrorMessage(error)}`);
   }
-  void loadRowsForCurrentVideo();
-  captureVisibleFallback();
-  updateActiveCue();
 }
 
 function start() {
@@ -504,4 +732,6 @@ function start() {
 
 window.addEventListener("yt-navigate-finish", () => window.setTimeout(start, 350));
 window.addEventListener("popstate", () => window.setTimeout(start, 350));
+window.addEventListener("yll-safe-reload", start);
+window.setTimeout(start, 0);
 window.setTimeout(start, 900);

@@ -120,8 +120,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.51 待审核</strong>
-          <p>修复中间字幕绑定主视频，并延长短句显示时间。</p>
+          <strong>0.1.53 待审核</strong>
+          <p>官方字幕持续后台重试，临时 CC 采集不再阻断官方轨道。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

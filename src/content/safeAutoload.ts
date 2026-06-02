@@ -3,6 +3,8 @@ type LabCue = {
   durationMs: number;
   text: string;
   source: "official" | "transcript" | "transcript-panel" | "text-track" | "timedtext" | "visible";
+  translatedText?: string;
+  translationProvider?: "web" | "ai" | "youtube" | "none";
 };
 
 type RawCaptionTrack = {
@@ -55,17 +57,44 @@ type CapturedTimedText = {
   capturedAt: number;
 };
 
-const PANEL_ID = "yll-safe-panel";
-const STATUS_ID = "yll-safe-status";
-const LIST_ID = "yll-safe-list";
-const STYLE_ID = "yll-safe-style";
-const OVERLAY_ID = "yll-safe-overlay";
+const PANEL_ID = "yll-lab-panel-v2";
+const STATUS_ID = "yll-lab-status-v2";
+const LIST_ID = "yll-lab-list-v2";
+const STYLE_ID = "yll-lab-style-v2";
+const OVERLAY_ID = "yll-lab-overlay-v2";
+const WORD_POPOVER_ID = "yll-lab-word-popover-v2";
+const SETTINGS_PANEL_ID = "yll-lab-settings-v2";
+const PRACTICE_ID = "yll-lab-practice-v2";
+const OLD_PANEL_ID = "yll-safe-panel";
+const OLD_OVERLAY_ID = "yll-safe-overlay";
+const OLD_WORD_POPOVER_ID = "yll-safe-word-popover";
+const OLD_SETTINGS_PANEL_ID = "yll-safe-settings";
+const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
+const SETTINGS_KEY = "yll-safe-settings-v1";
+const SCRIPT_VERSION = "0.1.53";
 const POLL_MS = 500;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 350;
 const MIN_OVERLAY_DURATION_MS = 2200;
+const TARGET_LANGUAGE = "zh-CN";
+const TRANSLATION_BATCH_SIZE = 18;
+const OFFICIAL_RETRY_MS = 3500;
+
+type SafeSettings = {
+  hideNativeCaptions: boolean;
+  showTranslations: boolean;
+  overlayPositionPercent: number;
+  overlayFontSize: number;
+};
+
+const DEFAULT_SETTINGS: SafeSettings = {
+  hideNativeCaptions: true,
+  showTranslations: true,
+  overlayPositionPercent: 82,
+  overlayFontSize: 24
+};
 
 const runtime = window as typeof window & {
   __yllSafeTimer?: number;
@@ -74,9 +103,17 @@ const runtime = window as typeof window & {
   __yllSafeActiveKey?: string;
   __yllSafeLoadedVideoId?: string;
   __yllSafeLoadingVideoId?: string;
+  __yllSafeTranslationToken?: number;
+  __yllSafeTranslatedVideoId?: string;
+  __yllSafeIsTranslating?: boolean;
+  __yllSafeSettings?: SafeSettings;
+  __yllSafeScriptVersion?: string;
   __yllSafeIsLoadingOfficial?: boolean;
   __yllSafeCanUseVisibleFallback?: boolean;
   __yllSafeLastFailure?: string;
+  __yllSafeLastOfficialAttemptAt?: number;
+  __yllSafeOfficialAttemptCount?: number;
+  __yllSafeLastOfficialDebug?: string[];
   __yllTimedTextBridgeListening?: boolean;
   __yllTimedTextBridgeInstalled?: boolean;
   __yllCapturedTimedText?: CapturedTimedText[];
@@ -88,6 +125,11 @@ const runtime = window as typeof window & {
 function removeLegacyContentApp() {
   document.getElementById(LEGACY_HOST_ID)?.remove();
   document.getElementById(LEGACY_NATIVE_HIDE_STYLE_ID)?.remove();
+  document.getElementById(OLD_PANEL_ID)?.remove();
+  document.getElementById(OLD_OVERLAY_ID)?.remove();
+  document.getElementById(OLD_WORD_POPOVER_ID)?.remove();
+  document.getElementById(OLD_SETTINGS_PANEL_ID)?.remove();
+  document.getElementById(OLD_PRACTICE_ID)?.remove();
 }
 
 function isWatchPage() {
@@ -170,6 +212,52 @@ function escapeHtml(text: string) {
   return text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char] ?? char);
 }
 
+function loadSafeSettings(): SafeSettings {
+  if (runtime.__yllSafeSettings) return runtime.__yllSafeSettings;
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") as Partial<SafeSettings>;
+    runtime.__yllSafeSettings = {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      overlayPositionPercent: Math.min(94, Math.max(50, Number(stored.overlayPositionPercent ?? DEFAULT_SETTINGS.overlayPositionPercent))),
+      overlayFontSize: Math.min(42, Math.max(16, Number(stored.overlayFontSize ?? DEFAULT_SETTINGS.overlayFontSize)))
+    };
+  } catch {
+    runtime.__yllSafeSettings = DEFAULT_SETTINGS;
+  }
+  return runtime.__yllSafeSettings;
+}
+
+function saveSafeSettings(settings: SafeSettings) {
+  runtime.__yllSafeSettings = settings;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  applySafeSettings();
+  renderSettingsPanel();
+  renderRows(runtime.__yllSafeRows ?? []);
+  updateActiveCue();
+}
+
+function applySafeSettings() {
+  const settings = loadSafeSettings();
+  const hasOfficialRows = (runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible");
+  document.documentElement.classList.toggle("yll-hide-native-captions", settings.hideNativeCaptions && hasOfficialRows);
+}
+
+function renderClickableText(text: string) {
+  const pattern = /(\p{L}[\p{L}\p{M}'-]*|\p{N}+)/gu;
+  let output = "";
+  let lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const word = match[0];
+    const index = match.index ?? 0;
+    output += escapeHtml(text.slice(lastIndex, index));
+    output += `<span class="yll-word" role="button" tabindex="0" data-word="${escapeHtml(word)}">${escapeHtml(word)}</span>`;
+    lastIndex = index + word.length;
+  }
+  output += escapeHtml(text.slice(lastIndex));
+  return output;
+}
+
 function formatClock(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(total / 3600);
@@ -185,6 +273,10 @@ function cueKey(cue: LabCue) {
 
 function dedupeKey(cue: LabCue) {
   return `${cue.source}:${Math.round(cue.startMs / 500)}:${normalizeForCompare(cue.text)}`;
+}
+
+function translationKey(cue: LabCue) {
+  return `${Math.round(cue.startMs / 100)}:${normalizeForCompare(cue.text)}`;
 }
 
 function normalizeForCompare(text: string) {
@@ -282,6 +374,15 @@ function installStyle() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
+    #${OLD_PANEL_ID},
+    #${OLD_OVERLAY_ID},
+    #${OLD_WORD_POPOVER_ID},
+    #${OLD_SETTINGS_PANEL_ID},
+    #${OLD_PRACTICE_ID} {
+      display: none !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
     #${PANEL_ID} {
       position: fixed;
       right: 16px;
@@ -302,8 +403,8 @@ function installStyle() {
     }
     #${PANEL_ID} * { box-sizing: border-box; }
     #${PANEL_ID} .yll-head {
-      flex: 0 0 76px;
-      height: 76px;
+      flex: 0 0 112px;
+      height: 112px;
       padding: 12px;
       border-bottom: 1px solid rgba(255,255,255,.12);
       background: #202224;
@@ -325,9 +426,29 @@ function installStyle() {
       border-radius: 6px;
       cursor: pointer;
     }
+    #${PANEL_ID} .yll-toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    #${PANEL_ID} .yll-tool {
+      height: 30px;
+      color: #121212;
+      background: #ffc857;
+      border: 0;
+      border-radius: 6px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    #${PANEL_ID} .yll-tool.secondary {
+      color: #f7f8f8;
+      background: #2d3034;
+      border: 1px solid rgba(255,255,255,.14);
+    }
     #${STATUS_ID} {
-      margin-top: 7px;
-      height: 34px;
+      margin-top: 8px;
+      height: 30px;
       overflow: hidden;
       color: #a3aab5;
       font-size: 12px;
@@ -367,6 +488,135 @@ function installStyle() {
       overflow-wrap: anywhere;
       font-weight: 650;
     }
+    #${LIST_ID} .yll-translation {
+      margin-top: 4px;
+      color: #cfd4dc;
+      font-size: 12px;
+      font-weight: 500;
+      overflow-wrap: anywhere;
+    }
+    #${LIST_ID}.hide-translations .yll-translation { display: none; }
+    #${LIST_ID} .yll-word {
+      border-radius: 3px;
+      cursor: help;
+    }
+    #${LIST_ID} .yll-word:hover,
+    #${LIST_ID} .yll-word:focus {
+      color: #111;
+      background: #ffc857;
+      outline: none;
+    }
+    #${WORD_POPOVER_ID} {
+      position: fixed;
+      z-index: 2147483647;
+      right: 394px;
+      top: 86px;
+      width: 260px;
+      max-width: calc(100vw - 430px);
+      padding: 10px 12px;
+      color: #f7f8f8;
+      background: #25282c;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 8px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.32);
+      font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #${WORD_POPOVER_ID} strong { display: block; margin-bottom: 4px; color: #ffc857; }
+    #${WORD_POPOVER_ID} p { margin: 0; color: #d7dbe1; }
+    #${SETTINGS_PANEL_ID} {
+      position: fixed;
+      z-index: 2147483647;
+      right: 394px;
+      top: 76px;
+      width: 300px;
+      max-width: calc(100vw - 430px);
+      padding: 14px;
+      color: #f7f8f8;
+      background: #25282c;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 8px;
+      box-shadow: 0 14px 34px rgba(0,0,0,.34);
+      font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #${SETTINGS_PANEL_ID} h3 { margin: 0 0 10px; font-size: 15px; }
+    #${SETTINGS_PANEL_ID} label {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0;
+      border-top: 1px solid rgba(255,255,255,.09);
+    }
+    #${SETTINGS_PANEL_ID} input[type="range"] { width: 120px; }
+    #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
+    #${PRACTICE_ID} {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: grid;
+      place-items: center;
+      background: rgba(0,0,0,.82);
+      color: #f7f8f8;
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #${PRACTICE_ID} .yll-practice-card {
+      width: min(860px, calc(100vw - 48px));
+      min-height: 460px;
+      padding: 26px;
+      background: #181a1d;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 8px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.46);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+    }
+    #${PRACTICE_ID} .yll-practice-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+    #${PRACTICE_ID} h2 { margin: 0; font-size: 18px; }
+    #${PRACTICE_ID} .yll-practice-sentence {
+      margin: 20px 0 10px;
+      font-size: 28px;
+      font-weight: 760;
+      line-height: 1.35;
+    }
+    #${PRACTICE_ID} .yll-practice-translation { color: #f5e86e; font-size: 20px; }
+    #${PRACTICE_ID} textarea {
+      width: 100%;
+      min-height: 100px;
+      resize: vertical;
+      margin-top: 16px;
+      padding: 12px;
+      color: #fff;
+      background: #24272b;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 6px;
+      font: inherit;
+    }
+    #${PRACTICE_ID} .yll-practice-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    #${PRACTICE_ID} button {
+      height: 34px;
+      padding: 0 14px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: #2d3034;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #${PRACTICE_ID} button.primary {
+      color: #151515;
+      background: #ffc857;
+      border: 0;
+    }
     #${OVERLAY_ID} {
       position: fixed;
       z-index: 2147483646;
@@ -385,6 +635,14 @@ function installStyle() {
       opacity: 0;
     }
     #${OVERLAY_ID}.is-visible { opacity: 1; }
+    #${OVERLAY_ID} .yll-overlay-source { display: block; }
+    #${OVERLAY_ID} .yll-overlay-translation {
+      display: block;
+      margin-top: 4px;
+      color: #f5e86e;
+      font-size: 20px;
+      font-weight: 650;
+    }
     html.yll-hide-native-captions .ytp-caption-window-container,
     html.yll-hide-native-captions .caption-window,
     html.yll-hide-native-captions .ytp-caption-segment {
@@ -400,15 +658,23 @@ function mountPanel() {
   removeLegacyContentApp();
   installStyle();
   const existing = document.getElementById(PANEL_ID);
-  if (existing) return existing;
+  if (existing) {
+    if (existing.getAttribute("data-yll-version") === SCRIPT_VERSION) return existing;
+    existing.remove();
+  }
 
   const panel = document.createElement("aside");
   panel.id = PANEL_ID;
+  panel.setAttribute("data-yll-version", SCRIPT_VERSION);
   panel.innerHTML = `
     <div class="yll-head">
       <div class="yll-title-row">
         <div class="yll-title">YouTube Language Lab</div>
         <button class="yll-close" type="button">关闭</button>
+      </div>
+      <div class="yll-toolbar">
+        <button class="yll-tool" type="button" data-yll-action="practice">练习当前句</button>
+        <button class="yll-tool secondary" type="button" data-yll-action="settings">字幕设置</button>
       </div>
       <div id="${STATUS_ID}">正在连接当前 YouTube 视频页...</div>
     </div>
@@ -417,11 +683,22 @@ function mountPanel() {
   panel.querySelector<HTMLButtonElement>(".yll-close")?.addEventListener("click", () => {
     panel.remove();
     document.getElementById(OVERLAY_ID)?.remove();
+    document.getElementById(WORD_POPOVER_ID)?.remove();
+    document.getElementById(SETTINGS_PANEL_ID)?.remove();
+    document.getElementById(PRACTICE_ID)?.remove();
     document.documentElement.classList.remove("yll-hide-native-captions");
     if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
     runtime.__yllSafeTimer = undefined;
+    runtime.__yllSafeTranslationToken = undefined;
+  });
+  panel.querySelector<HTMLButtonElement>('[data-yll-action="settings"]')?.addEventListener("click", () => {
+    toggleSettingsPanel();
+  });
+  panel.querySelector<HTMLButtonElement>('[data-yll-action="practice"]')?.addEventListener("click", () => {
+    openPracticeOverlay();
   });
   document.documentElement.appendChild(panel);
+  applySafeSettings();
   return panel;
 }
 
@@ -431,6 +708,161 @@ function setStatus(text: string) {
     status.textContent = text;
     status.title = text;
   }
+}
+
+function mountWordPopover() {
+  let popover = document.getElementById(WORD_POPOVER_ID);
+  if (popover) return popover;
+  popover = document.createElement("div");
+  popover.id = WORD_POPOVER_ID;
+  popover.hidden = true;
+  document.documentElement.appendChild(popover);
+  document.addEventListener("click", (event) => {
+    if (!popover || popover.hidden) return;
+    const target = event.target as Element | null;
+    if (target?.closest(`#${WORD_POPOVER_ID}`) || target?.closest(`#${PANEL_ID}`)) return;
+    popover.hidden = true;
+  });
+  return popover;
+}
+
+function showWordPopover(word: string, message: string) {
+  const popover = mountWordPopover();
+  popover.hidden = false;
+  popover.innerHTML = `<strong>${escapeHtml(word)}</strong><p>${escapeHtml(message)}</p>`;
+}
+
+function toggleSettingsPanel() {
+  const existing = document.getElementById(SETTINGS_PANEL_ID);
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  ensureSettingsPanel();
+  renderSettingsPanel();
+}
+
+function renderSettingsPanel() {
+  const existing = document.getElementById(SETTINGS_PANEL_ID);
+  const settings = loadSafeSettings();
+  if (!existing) return;
+  existing.innerHTML = settingsPanelHtml(settings);
+  bindSettingsPanel(existing);
+}
+
+function settingsPanelHtml(settings: SafeSettings) {
+  return `
+    <h3>视频字幕</h3>
+    <label>
+      <span>隐藏 YouTube 原生字幕</span>
+      <input type="checkbox" data-setting="hideNativeCaptions" ${settings.hideNativeCaptions ? "checked" : ""}>
+    </label>
+    <label>
+      <span>显示中文译文</span>
+      <input type="checkbox" data-setting="showTranslations" ${settings.showTranslations ? "checked" : ""}>
+    </label>
+    <label>
+      <span>字幕位置</span>
+      <span><input type="range" min="50" max="94" step="1" data-setting="overlayPositionPercent" value="${settings.overlayPositionPercent}"> <span class="yll-setting-value">${settings.overlayPositionPercent}%</span></span>
+    </label>
+    <label>
+      <span>原文字号</span>
+      <span><input type="range" min="16" max="42" step="1" data-setting="overlayFontSize" value="${settings.overlayFontSize}"> <span class="yll-setting-value">${settings.overlayFontSize}px</span></span>
+    </label>
+  `;
+}
+
+function bindSettingsPanel(panel: HTMLElement) {
+  panel.querySelectorAll<HTMLInputElement>("input[data-setting]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const current = loadSafeSettings();
+      const key = input.dataset.setting as keyof SafeSettings;
+      const next: SafeSettings = { ...current };
+      if (input.type === "checkbox") {
+        (next[key] as boolean | number) = input.checked;
+      } else {
+        (next[key] as boolean | number) = Number(input.value);
+      }
+      saveSafeSettings(next);
+    });
+  });
+}
+
+function ensureSettingsPanel() {
+  let panel = document.getElementById(SETTINGS_PANEL_ID);
+  if (panel) return panel;
+  panel = document.createElement("section");
+  panel.id = SETTINGS_PANEL_ID;
+  document.documentElement.appendChild(panel);
+  return panel;
+}
+
+function currentCue() {
+  const rows = runtime.__yllSafeRows ?? [];
+  if (!rows.length) return undefined;
+  const activeKey = runtime.__yllSafeActiveKey;
+  return rows.find((cue) => cueKey(cue) === activeKey) ?? rows[0];
+}
+
+function clozeText(text: string) {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 4) return text.replace(/\S+/, "____");
+  return words.map((word, index) => (index % 5 === 2 ? "____" : word)).join(" ");
+}
+
+function openPracticeOverlay() {
+  const cue = currentCue();
+  if (!cue) {
+    setStatus("还没有可练习的字幕句子。");
+    return;
+  }
+  const video = getMainVideo();
+  video?.pause();
+  document.getElementById(PRACTICE_ID)?.remove();
+  const overlay = document.createElement("section");
+  overlay.id = PRACTICE_ID;
+  overlay.innerHTML = `
+    <div class="yll-practice-card">
+      <header class="yll-practice-head">
+        <div>
+          <h2>全屏混合练习</h2>
+          <span>${formatClock(cue.startMs)} · 跟读 / 听写 / 填空 / 理解选择</span>
+        </div>
+        <button type="button" data-practice-close>关闭</button>
+      </header>
+      <main>
+        <div class="yll-practice-sentence" data-practice-sentence>${escapeHtml(cue.text)}</div>
+        <div class="yll-practice-translation">${escapeHtml(cue.translatedText ?? "译文生成后会显示在这里")}</div>
+        <textarea placeholder="听写模式：在这里输入你听到的句子"></textarea>
+      </main>
+      <footer class="yll-practice-actions">
+        <button class="primary" type="button" data-practice-mode="shadowing">跟读当前句</button>
+        <button type="button" data-practice-mode="dictation">听写</button>
+        <button type="button" data-practice-mode="cloze">填空</button>
+        <button type="button" data-practice-mode="quiz">理解选择</button>
+        <button type="button" data-practice-replay>播放原声</button>
+      </footer>
+    </div>
+  `;
+  overlay.querySelector<HTMLElement>("[data-practice-close]")?.addEventListener("click", () => overlay.remove());
+  overlay.querySelector<HTMLElement>("[data-practice-replay]")?.addEventListener("click", () => {
+    const player = getMainVideo();
+    if (!player) return;
+    player.currentTime = cue.startMs / 1000;
+    void player.play();
+  });
+  overlay.querySelectorAll<HTMLElement>("[data-practice-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.practiceMode;
+      const sentence = overlay.querySelector<HTMLElement>("[data-practice-sentence]");
+      if (!sentence) return;
+      if (mode === "cloze") sentence.textContent = clozeText(cue.text);
+      if (mode === "dictation") sentence.textContent = "听原声，写下完整句子";
+      if (mode === "quiz") sentence.textContent = cue.translatedText ? `选择与译文匹配的原句：${cue.translatedText}` : "译文生成后可进行理解选择";
+      if (mode === "shadowing") sentence.textContent = cue.text;
+    });
+  });
+  document.documentElement.appendChild(overlay);
 }
 
 function mountOverlay() {
@@ -464,25 +896,32 @@ function positionOverlay() {
   const overlay = document.getElementById(OVERLAY_ID);
   const video = getMainVideo();
   if (!overlay || !video) return;
+  const settings = loadSafeSettings();
   const rect = video.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) {
     overlay.classList.remove("is-visible");
     return;
   }
   overlay.style.left = `${rect.left + rect.width / 2}px`;
-  overlay.style.top = `${rect.top + rect.height * 0.82}px`;
+  overlay.style.top = `${rect.top + rect.height * (settings.overlayPositionPercent / 100)}px`;
   overlay.style.maxWidth = `${Math.max(280, Math.min(rect.width * 0.86, 980))}px`;
+  overlay.style.fontSize = `${settings.overlayFontSize}px`;
 }
 
 function setOverlayCue(cue?: LabCue) {
   const overlay = mountOverlay();
   positionOverlay();
   if (!cue?.text) {
-    overlay.textContent = "";
+    overlay.innerHTML = "";
     overlay.classList.remove("is-visible");
     return;
   }
-  overlay.textContent = cue.text;
+  const translation = cue.translatedText?.trim();
+  const settings = loadSafeSettings();
+  overlay.innerHTML = `
+    <span class="yll-overlay-source">${escapeHtml(cue.text)}</span>
+    ${translation && settings.showTranslations ? `<span class="yll-overlay-translation">${escapeHtml(translation)}</span>` : ""}
+  `;
   overlay.classList.add("is-visible");
 }
 
@@ -490,26 +929,47 @@ function renderRows(rows: LabCue[]) {
   const list = document.getElementById(LIST_ID);
   if (!list) return;
 
+  const settings = loadSafeSettings();
+  list.classList.toggle("hide-translations", !settings.showTranslations);
   const sorted = [...rows].sort((a, b) => a.startMs - b.startMs);
   list.innerHTML = sorted
     .map((cue) => {
       const key = cueKey(cue);
       const activeClass = key === runtime.__yllSafeActiveKey ? " is-active" : "";
       return `
-        <button class="yll-row${activeClass}" type="button" data-start="${cue.startMs}" data-key="${escapeHtml(key)}">
+        <div class="yll-row${activeClass}" role="button" tabindex="0" data-start="${cue.startMs}" data-key="${escapeHtml(key)}">
           <span class="yll-time">${formatClock(cue.startMs)}</span>
-          <span class="yll-text">${escapeHtml(cue.text)}</span>
-        </button>
+          <span>
+            <span class="yll-text">${renderClickableText(cue.text)}</span>
+            ${cue.translatedText ? `<span class="yll-translation">${escapeHtml(cue.translatedText)}</span>` : ""}
+          </span>
+        </div>
       `;
     })
     .join("");
 
-  list.querySelectorAll<HTMLButtonElement>(".yll-row[data-start]").forEach((button) => {
-    button.addEventListener("click", () => {
+  list.querySelectorAll<HTMLElement>(".yll-row[data-start]").forEach((button) => {
+    const activateRow = () => {
       const video = getMainVideo();
       if (!video) return;
       video.currentTime = Number(button.dataset.start ?? "0") / 1000;
       void video.play();
+    };
+    button.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement | null;
+      const wordElement = target?.closest<HTMLElement>(".yll-word");
+      if (wordElement?.dataset.word) {
+        event.preventDefault();
+        event.stopPropagation();
+        void lookupWord(wordElement.dataset.word, button.dataset.start);
+        return;
+      }
+      activateRow();
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      activateRow();
     });
   });
 }
@@ -561,19 +1021,40 @@ function updateActiveCue() {
 
 function saveRows(rows: LabCue[], sourceLabel: string) {
   const unique = new Map<string, LabCue>();
+  const existingTranslations = new Map(
+    (runtime.__yllSafeRows ?? [])
+      .filter((cue) => cue.translatedText)
+      .map((cue) => [translationKey(cue), { translatedText: cue.translatedText, translationProvider: cue.translationProvider }])
+  );
   for (const cue of rows) {
     if (!cue.text) continue;
     const compactCue = { ...cue, text: compactRepeatedPhrases(cue.text) };
+    const translated = existingTranslations.get(translationKey(compactCue));
+    if (translated?.translatedText) {
+      compactCue.translatedText = translated.translatedText;
+      compactCue.translationProvider = translated.translationProvider;
+    }
     const key = dedupeKey(compactCue);
     const existing = unique.get(key);
     unique.set(key, existing && existing.text.length >= compactCue.text.length ? existing : compactCue);
   }
-  runtime.__yllSafeRows = Array.from(unique.values());
-  const shouldHideNativeCaptions = runtime.__yllSafeRows.some((cue) => cue.source !== "visible");
-  document.documentElement.classList.toggle("yll-hide-native-captions", shouldHideNativeCaptions);
+  const sortedUnique = Array.from(unique.values()).sort((a, b) => a.startMs - b.startMs);
+  runtime.__yllSafeRows = sortedUnique.filter((cue, index, all) => {
+    const previous = all[index - 1];
+    if (!previous) return true;
+    const sameText = normalizeForCompare(previous.text) === normalizeForCompare(cue.text);
+    const nearby = Math.abs(cue.startMs - previous.startMs) < 3000;
+    return !(sameText && nearby);
+  });
+  if (runtime.__yllSafeRows.some((cue) => cue.source !== "visible")) {
+    runtime.__yllSafeLoadedVideoId = getVideoId() || runtime.__yllSafeLoadedVideoId;
+    runtime.__yllSafeCanUseVisibleFallback = false;
+  }
+  applySafeSettings();
   renderRows(runtime.__yllSafeRows);
   setStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕，来源：${sourceLabel}。`);
   updateActiveCue();
+  void translateRowsForCurrentVideo(sourceLabel);
 }
 
 function toErrorMessage(error: unknown) {
@@ -789,6 +1270,129 @@ async function sendRuntimeMessage<T>(message: { type: string; payload?: unknown 
       resolve(response);
     });
   });
+}
+
+function createVideoContext(videoId: string) {
+  const video = getMainVideo();
+  return {
+    videoId,
+    url: location.href,
+    title: document.title.replace(/\s+-\s+YouTube$/, ""),
+    durationSeconds: video?.duration && Number.isFinite(video.duration) ? Math.round(video.duration) : undefined
+  };
+}
+
+function cueForTranslation(cue: LabCue, videoId: string, idPrefix = "cue") {
+  return {
+    id: `${idPrefix}-${Math.round(cue.startMs)}-${Math.abs(hashString(cue.text))}`,
+    videoId,
+    startMs: cue.startMs,
+    durationMs: cue.durationMs,
+    text: cue.text,
+    sourceLanguage: "en"
+  };
+}
+
+function hashString(text: string) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+  return hash;
+}
+
+async function translateCueBatch(videoId: string, cues: LabCue[]) {
+  const response = await sendRuntimeMessage<Array<{ id: string; translatedText?: string; provider?: string }>>({
+    type: "TRANSLATE_CUES",
+    payload: {
+      videoContext: createVideoContext(videoId),
+      targetLanguage: TARGET_LANGUAGE,
+      cues: cues.map((cue) => cueForTranslation(cue, videoId))
+    }
+  });
+  if (!response?.ok) throw new Error(response?.error ?? "翻译请求没有返回结果");
+  return response.data;
+}
+
+async function translateRowsForCurrentVideo(sourceLabel: string) {
+  const videoId = getVideoId();
+  const rows = runtime.__yllSafeRows ?? [];
+  if (!videoId || !rows.length) return;
+  if (runtime.__yllSafeIsTranslating) return;
+  if (runtime.__yllSafeTranslatedVideoId === videoId && rows.every((row) => row.translatedText)) return;
+
+  const token = Date.now();
+  runtime.__yllSafeTranslationToken = token;
+  runtime.__yllSafeTranslatedVideoId = videoId;
+  runtime.__yllSafeIsTranslating = true;
+  const translatable = rows.filter((row) => !row.translatedText);
+  if (!translatable.length) {
+    runtime.__yllSafeIsTranslating = false;
+    return;
+  }
+
+  try {
+    setStatus(`已加载 ${rows.length} 条字幕，来源：${sourceLabel}；正在生成中文译文...`);
+    const translatedByKey = new Map<string, { translatedText?: string; provider?: string }>();
+    for (let index = 0; index < translatable.length; index += TRANSLATION_BATCH_SIZE) {
+      if (runtime.__yllSafeTranslationToken !== token || getVideoId() !== videoId) return;
+      const batch = translatable.slice(index, index + TRANSLATION_BATCH_SIZE);
+      try {
+        const translated = await translateCueBatch(videoId, batch);
+        translated.forEach((item, itemIndex) => {
+          const sourceCue = batch[itemIndex];
+          if (!sourceCue) return;
+          translatedByKey.set(translationKey(sourceCue), {
+            translatedText: item.translatedText,
+            provider: item.provider
+          });
+        });
+      } catch (error) {
+        setStatus(`已加载 ${rows.length} 条字幕；免费翻译暂时不可用：${toErrorMessage(error)}`);
+        break;
+      }
+
+      runtime.__yllSafeRows = (runtime.__yllSafeRows ?? []).map((row) => {
+        const translated = translatedByKey.get(translationKey(row));
+        if (!translated?.translatedText) return row;
+        return {
+          ...row,
+          translatedText: translated.translatedText,
+          translationProvider: translated.provider === "ai" || translated.provider === "youtube" || translated.provider === "web" ? translated.provider : "none"
+        };
+      });
+      renderRows(runtime.__yllSafeRows);
+      updateActiveCue();
+      setStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕，来源：${sourceLabel}；译文同步中 ${Math.min(index + TRANSLATION_BATCH_SIZE, translatable.length)}/${translatable.length}`);
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+    if (runtime.__yllSafeTranslationToken === token && getVideoId() === videoId) {
+      setStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕，来源：${sourceLabel}；中文译文已生成。`);
+    }
+  } finally {
+    if (runtime.__yllSafeTranslationToken === token) runtime.__yllSafeIsTranslating = false;
+  }
+}
+
+async function lookupWord(word: string, startMs?: string) {
+  const cleaned = cleanText(word).slice(0, 48);
+  if (!cleaned) return;
+  showWordPopover(cleaned, "正在查询...");
+  const videoId = getVideoId() || "current";
+  const cue: LabCue = {
+    startMs: Number(startMs ?? "0"),
+    durationMs: 1200,
+    text: cleaned,
+    source: "official"
+  };
+  try {
+    const translated = await translateCueBatch(videoId, [cue]);
+    const translatedText = translated[0]?.translatedText;
+    showWordPopover(cleaned, translatedText || "暂时没有查到译文。");
+  } catch (error) {
+    showWordPopover(cleaned, `查词失败：${toErrorMessage(error)}`);
+  }
 }
 
 async function readPlayerSnapshotViaBackground() {
@@ -1506,7 +2110,7 @@ function readVisibleCaptionCue(allowHiddenCaptions = false) {
       .map((element) => element.innerText || element.textContent || "")
       .join(" ")];
   const seen = new Set<string>();
-  const text = compactRepeatedPhrases(texts
+  const text = sanitizeVisibleCaptionText(compactRepeatedPhrases(texts
     .map(cleanText)
     .filter((item) => {
       const key = normalizeForCompare(item);
@@ -1514,7 +2118,7 @@ function readVisibleCaptionCue(allowHiddenCaptions = false) {
       seen.add(key);
       return true;
     })
-    .join(" "));
+    .join(" ")));
 
   const video = getMainVideo();
   if (!text || !video) return undefined;
@@ -1524,6 +2128,14 @@ function readVisibleCaptionCue(allowHiddenCaptions = false) {
     text,
     source: "visible" as const
   };
+}
+
+function sanitizeVisibleCaptionText(text: string) {
+  return cleanText(text
+    .replace(/\b(?:English|英语)\s*[（(]\s*(?:auto-generated|自动生成)\s*[）)]\s*(?:Click|点击)?\s*(?:Settings|查看设置)?/gi, " ")
+    .replace(/\b(?:Click|点击)\s*(?:Settings|查看设置)\b/gi, " ")
+    .replace(/\b(?:English|英语)\b\s*$/gi, " ")
+    .replace(/\s+/g, " "));
 }
 
 function ensureNativeCaptionsForFallback() {
@@ -1544,19 +2156,34 @@ function ensureNativeCaptionsForFallback() {
 
 async function loadRowsForCurrentVideo() {
   const videoId = getVideoId();
-  if (!videoId || runtime.__yllSafeLoadedVideoId === videoId || runtime.__yllSafeLoadingVideoId === videoId) return;
+  if (!videoId || runtime.__yllSafeLoadingVideoId === videoId) return;
+  const rows = runtime.__yllSafeRows ?? [];
+  const hasOfficialRows = rows.some((cue) => cue.source !== "visible");
+  if (runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRows) return;
+  const now = Date.now();
+  if (rows.length && !hasOfficialRows && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < OFFICIAL_RETRY_MS) {
+    return;
+  }
+
   runtime.__yllSafeLoadingVideoId = videoId;
-  runtime.__yllSafeLoadedVideoId = videoId;
   runtime.__yllSafeIsLoadingOfficial = true;
   runtime.__yllSafeCanUseVisibleFallback = false;
   runtime.__yllSafeLastFailure = undefined;
-  runtime.__yllSafeRows = [];
-  runtime.__yllSafeActiveKey = undefined;
-  document.documentElement.classList.remove("yll-hide-native-captions");
-  renderRows([]);
-  setStatus("正在读取官方字幕轨道...");
+  runtime.__yllSafeLastOfficialAttemptAt = now;
+  runtime.__yllSafeOfficialAttemptCount = (runtime.__yllSafeOfficialAttemptCount ?? 0) + 1;
+  runtime.__yllSafeLastOfficialDebug = [];
+  if (!rows.length || hasOfficialRows) {
+    runtime.__yllSafeRows = [];
+    runtime.__yllSafeActiveKey = undefined;
+    renderRows([]);
+  }
+  if (!rows.some((cue) => cue.source === "visible")) {
+    document.documentElement.classList.remove("yll-hide-native-captions");
+  }
+  setStatus(`正在读取官方字幕轨道... 第 ${runtime.__yllSafeOfficialAttemptCount} 次`);
   await ensureTimedTextBridge().catch((error) => {
     runtime.__yllSafeLastFailure = `bridge: ${toErrorMessage(error)}`;
+    runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
   });
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -1571,10 +2198,13 @@ async function loadRowsForCurrentVideo() {
         saveRows(officialRows, sourceLabel);
         runtime.__yllSafeIsLoadingOfficial = false;
         runtime.__yllSafeLoadingVideoId = undefined;
+        runtime.__yllSafeLoadedVideoId = videoId;
+        runtime.__yllSafeLastOfficialDebug = [`success:${sourceLabel}:${officialRows.length}`];
         return;
       }
     } catch (error) {
       runtime.__yllSafeLastFailure = `official: ${toErrorMessage(error)}`;
+      runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
 
     try {
@@ -1583,10 +2213,13 @@ async function loadRowsForCurrentVideo() {
         saveRows(textTrackRows, "video.textTracks");
         runtime.__yllSafeIsLoadingOfficial = false;
         runtime.__yllSafeLoadingVideoId = undefined;
+        runtime.__yllSafeLoadedVideoId = videoId;
+        runtime.__yllSafeLastOfficialDebug = [`success:video.textTracks:${textTrackRows.length}`];
         return;
       }
     } catch (error) {
       runtime.__yllSafeLastFailure = `textTracks: ${toErrorMessage(error)}`;
+      runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
 
     try {
@@ -1595,10 +2228,13 @@ async function loadRowsForCurrentVideo() {
         saveRows(directRows, "YouTube timedtext");
         runtime.__yllSafeIsLoadingOfficial = false;
         runtime.__yllSafeLoadingVideoId = undefined;
+        runtime.__yllSafeLoadedVideoId = videoId;
+        runtime.__yllSafeLastOfficialDebug = [`success:directTimedText:${directRows.length}`];
         return;
       }
     } catch (error) {
       runtime.__yllSafeLastFailure = `timedtext: ${toErrorMessage(error)}`;
+      runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
 
     await new Promise((resolve) => window.setTimeout(resolve, 600));
@@ -1608,7 +2244,8 @@ async function loadRowsForCurrentVideo() {
   runtime.__yllSafeLoadingVideoId = undefined;
   runtime.__yllSafeCanUseVisibleFallback = true;
   ensureNativeCaptionsForFallback();
-  setStatus(`官方字幕暂未读到；若页面已有原生字幕文本，将仅临时采集右侧列表。${runtime.__yllSafeLastFailure ? `最近错误：${runtime.__yllSafeLastFailure}` : ""}`);
+  const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
+  setStatus(`官方字幕暂未读到，稍后会自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`);
 }
 
 function captureVisibleFallback() {
@@ -1633,15 +2270,18 @@ function captureVisibleFallback() {
     }
   }
   if (recentSimilarIndex >= 0) {
-    rows[recentSimilarIndex] = cue.text.length > rows[recentSimilarIndex].text.length ? cue : rows[recentSimilarIndex];
+    const previous = rows[recentSimilarIndex];
+    rows[recentSimilarIndex] = cue.text.length > previous.text.length ? { ...cue, translatedText: previous.translatedText, translationProvider: previous.translationProvider } : previous;
     runtime.__yllSafeRows = rows.slice(-MAX_VISIBLE_ROWS);
     renderRows(runtime.__yllSafeRows);
     updateActiveCue();
+    void translateRowsForCurrentVideo("页面字幕采集");
     return;
   }
   runtime.__yllSafeRows = [...rows, cue].slice(-MAX_VISIBLE_ROWS);
   renderRows(runtime.__yllSafeRows);
   setStatus(`已临时采集 ${runtime.__yllSafeRows.length} 条页面字幕；原生 CC 已隐藏，仍建议优先使用官方字幕轨。`);
+  void translateRowsForCurrentVideo("页面字幕采集");
 }
 
 function tick() {
@@ -1655,6 +2295,15 @@ function tick() {
       runtime.__yllSafeIsLoadingOfficial = false;
       runtime.__yllSafeCanUseVisibleFallback = false;
       runtime.__yllSafeRows = [];
+      runtime.__yllSafeTranslationToken = undefined;
+      runtime.__yllSafeTranslatedVideoId = undefined;
+      runtime.__yllSafeIsTranslating = false;
+      runtime.__yllSafeLastOfficialAttemptAt = undefined;
+      runtime.__yllSafeOfficialAttemptCount = undefined;
+      runtime.__yllSafeLastOfficialDebug = undefined;
+      document.getElementById(WORD_POPOVER_ID)?.remove();
+      document.getElementById(SETTINGS_PANEL_ID)?.remove();
+      document.getElementById(PRACTICE_ID)?.remove();
       return;
     }
 
@@ -1668,6 +2317,15 @@ function tick() {
       runtime.__yllSafeIsLoadingOfficial = false;
       runtime.__yllSafeCanUseVisibleFallback = false;
       runtime.__yllTimedTextBridgeInstalled = false;
+      runtime.__yllSafeTranslationToken = undefined;
+      runtime.__yllSafeTranslatedVideoId = undefined;
+      runtime.__yllSafeIsTranslating = false;
+      runtime.__yllSafeLastOfficialAttemptAt = undefined;
+      runtime.__yllSafeOfficialAttemptCount = undefined;
+      runtime.__yllSafeLastOfficialDebug = undefined;
+      document.getElementById(WORD_POPOVER_ID)?.remove();
+      document.getElementById(SETTINGS_PANEL_ID)?.remove();
+      document.getElementById(PRACTICE_ID)?.remove();
     }
     void loadRowsForCurrentVideo().catch((error) => {
       runtime.__yllSafeIsLoadingOfficial = false;
@@ -1677,9 +2335,6 @@ function tick() {
       setStatus(`字幕读取任务异常：${toErrorMessage(error)}`);
     });
     captureVisibleFallback();
-    if ((runtime.__yllSafeRows ?? []).some((cue) => cue.source === "visible") && !(runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible")) {
-      setOverlayCue(undefined);
-    }
     updateActiveCue();
   } catch (error) {
     mountPanel();
@@ -1703,6 +2358,15 @@ window.addEventListener("yll-safe-reload", () => {
   runtime.__yllSafeCanUseVisibleFallback = false;
   runtime.__yllSafeRows = [];
   runtime.__yllSafeActiveKey = undefined;
+  runtime.__yllSafeTranslationToken = undefined;
+  runtime.__yllSafeTranslatedVideoId = undefined;
+  runtime.__yllSafeIsTranslating = false;
+  runtime.__yllSafeLastOfficialAttemptAt = undefined;
+  runtime.__yllSafeOfficialAttemptCount = undefined;
+  runtime.__yllSafeLastOfficialDebug = undefined;
+  document.getElementById(WORD_POPOVER_ID)?.remove();
+  document.getElementById(SETTINGS_PANEL_ID)?.remove();
+  document.getElementById(PRACTICE_ID)?.remove();
   renderRows([]);
   setOverlayCue(undefined);
   start();

@@ -120,8 +120,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.53 待审核</strong>
-          <p>官方字幕持续后台重试，临时 CC 采集不再阻断官方轨道。</p>
+          <strong>0.1.58 待审核</strong>
+          <p>官方重试加入冷却，避免刚启用 fallback 又被读取任务抢掉。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

@@ -2,6 +2,7 @@
 
 ## Development Rules
 
+- Keep `docs/feature-timeline.md` updated. Whenever a feature is completed, restored, paused, or regressed, add a timestamped note with validation status.
 - Protect the official YouTube caption loading path first. Fallback CC collection is only a temporary display path and must not block later official-track retries.
 - After rebuilding the unpacked Chrome extension, reload the extension in `chrome://extensions`, then refresh the YouTube watch page. A page refresh alone can keep an old content script alive.
 - Before pushing caption-related changes, run:

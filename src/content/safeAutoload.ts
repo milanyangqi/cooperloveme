@@ -65,6 +65,7 @@ const OVERLAY_ID = "yll-lab-overlay-v2";
 const WORD_POPOVER_ID = "yll-lab-word-popover-v2";
 const SETTINGS_PANEL_ID = "yll-lab-settings-v2";
 const PRACTICE_ID = "yll-lab-practice-v2";
+const DEBUG_PANEL_ID = "yll-lab-debug-v2";
 const OLD_PANEL_ID = "yll-safe-panel";
 const OLD_OVERLAY_ID = "yll-safe-overlay";
 const OLD_WORD_POPOVER_ID = "yll-safe-word-popover";
@@ -73,7 +74,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.53";
+const SCRIPT_VERSION = "0.1.58";
 const POLL_MS = 500;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 350;
@@ -81,6 +82,8 @@ const MIN_OVERLAY_DURATION_MS = 2200;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
+const OFFICIAL_AUTO_ATTEMPTS = 2;
+const OFFICIAL_ATTEMPT_TIMEOUT_MS = 5000;
 
 type SafeSettings = {
   hideNativeCaptions: boolean;
@@ -114,6 +117,8 @@ const runtime = window as typeof window & {
   __yllSafeLastOfficialAttemptAt?: number;
   __yllSafeOfficialAttemptCount?: number;
   __yllSafeLastOfficialDebug?: string[];
+  __yllSafeDebugLog?: string[];
+  __yllSafeDebugSnapshot?: () => unknown;
   __yllTimedTextBridgeListening?: boolean;
   __yllTimedTextBridgeInstalled?: boolean;
   __yllCapturedTimedText?: CapturedTimedText[];
@@ -549,6 +554,25 @@ function installStyle() {
     }
     #${SETTINGS_PANEL_ID} input[type="range"] { width: 120px; }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
+    #${DEBUG_PANEL_ID} {
+      position: fixed;
+      z-index: 2147483647;
+      right: 394px;
+      top: 76px;
+      width: 420px;
+      max-width: calc(100vw - 430px);
+      max-height: 70vh;
+      padding: 12px;
+      color: #f7f8f8;
+      background: #202224;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 8px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.32);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    #${DEBUG_PANEL_ID} strong { display: block; margin-bottom: 8px; color: #ffc857; font: 700 13px/1.2 system-ui, sans-serif; }
     #${PRACTICE_ID} {
       position: fixed;
       inset: 0;
@@ -675,6 +699,7 @@ function mountPanel() {
       <div class="yll-toolbar">
         <button class="yll-tool" type="button" data-yll-action="practice">练习当前句</button>
         <button class="yll-tool secondary" type="button" data-yll-action="settings">字幕设置</button>
+        <button class="yll-tool secondary" type="button" data-yll-action="debug">诊断日志</button>
       </div>
       <div id="${STATUS_ID}">正在连接当前 YouTube 视频页...</div>
     </div>
@@ -697,6 +722,9 @@ function mountPanel() {
   panel.querySelector<HTMLButtonElement>('[data-yll-action="practice"]')?.addEventListener("click", () => {
     openPracticeOverlay();
   });
+  panel.querySelector<HTMLButtonElement>('[data-yll-action="debug"]')?.addEventListener("click", () => {
+    toggleDebugPanel();
+  });
   document.documentElement.appendChild(panel);
   applySafeSettings();
   return panel;
@@ -708,6 +736,75 @@ function setStatus(text: string) {
     status.textContent = text;
     status.title = text;
   }
+}
+
+function addDebugLog(event: string, details?: unknown) {
+  const video = getMainVideo();
+  const time = new Date().toISOString().slice(11, 19);
+  const videoTime = video ? `${video.currentTime.toFixed(1)}s` : "-";
+  let suffix = "";
+  if (details !== undefined) {
+    try {
+      suffix = ` ${JSON.stringify(details)}`;
+    } catch {
+      suffix = ` ${String(details)}`;
+    }
+  }
+  runtime.__yllSafeDebugLog = [
+    ...(runtime.__yllSafeDebugLog ?? []),
+    `[${time} @${videoTime}] ${event}${suffix}`
+  ].slice(-140);
+  renderDebugPanel();
+}
+
+function debugSnapshot() {
+  const rows = runtime.__yllSafeRows ?? [];
+  return {
+    version: SCRIPT_VERSION,
+    videoId: getVideoId(),
+    rows: rows.length,
+    sources: Array.from(new Set(rows.map((cue) => cue.source))),
+    loadingVideoId: runtime.__yllSafeLoadingVideoId,
+    loadedVideoId: runtime.__yllSafeLoadedVideoId,
+    isLoadingOfficial: runtime.__yllSafeIsLoadingOfficial,
+    canUseFallback: runtime.__yllSafeCanUseVisibleFallback,
+    attempts: runtime.__yllSafeOfficialAttemptCount,
+    lastFailure: runtime.__yllSafeLastFailure,
+    lastOfficialDebug: runtime.__yllSafeLastOfficialDebug,
+    log: runtime.__yllSafeDebugLog ?? []
+  };
+}
+
+function toggleDebugPanel() {
+  const existing = document.getElementById(DEBUG_PANEL_ID);
+  if (existing) {
+    existing.remove();
+    return;
+  }
+  const panel = document.createElement("section");
+  panel.id = DEBUG_PANEL_ID;
+  document.documentElement.appendChild(panel);
+  renderDebugPanel();
+}
+
+function renderDebugPanel() {
+  const panel = document.getElementById(DEBUG_PANEL_ID);
+  if (!panel) return;
+  const snapshot = debugSnapshot();
+  panel.innerHTML = `<strong>字幕诊断日志</strong>${escapeHtml(JSON.stringify(snapshot, null, 2))}`;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(`${label} timeout ${ms}ms`)), ms);
+    promise.then((value) => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }).catch((error) => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 function mountWordPopover() {
@@ -931,7 +1028,7 @@ function renderRows(rows: LabCue[]) {
 
   const settings = loadSafeSettings();
   list.classList.toggle("hide-translations", !settings.showTranslations);
-  const sorted = [...rows].sort((a, b) => a.startMs - b.startMs);
+  const sorted = [...rows].sort((a, b) => b.startMs - a.startMs);
   list.innerHTML = sorted
     .map((cue) => {
       const key = cueKey(cue);
@@ -1012,7 +1109,7 @@ function updateActiveCue() {
   if (activeRow) {
     const rowTop = activeRow.offsetTop;
     const rowCenter = rowTop + activeRow.offsetHeight / 2;
-    const targetTop = Math.max(0, rowCenter - list.clientHeight * 0.72);
+    const targetTop = Math.max(0, rowCenter - list.clientHeight * 0.24);
     if (Math.abs(list.scrollTop - targetTop) > 12) {
       list.scrollTo({ top: targetTop, behavior: "auto" });
     }
@@ -1933,6 +2030,7 @@ function parseCaptionBody(videoId: string, body: string, source: LabCue["source"
 }
 
 async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], source: LabCue["source"]) {
+  addDebugLog("tracks:start", { source, tracks: tracks.length });
   if (!tracks.length) {
     throw new Error(`${source}: captionTracks=0`);
   }
@@ -1946,8 +2044,10 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
     if (!url.searchParams.get("fmt")) url.searchParams.set("fmt", "json3");
     const language = track.languageCode ?? track.language_code ?? getTrackName(track) ?? "unknown";
     try {
+      addDebugLog("tracks:fetch", { source, language, host: url.hostname, token: captionUrlRequiresPoToken(url) });
       const body = await fetchCaptionText(url.toString());
       const rows = parseCaptionBody(videoId, body, source).filter((cue) => cue.text && videoId && language);
+      addDebugLog("tracks:parsed", { source, language, body: body.length, rows: rows.length });
       if (rows.length) return mergeAdjacentCues(rows);
       const tokenHint = captionUrlRequiresPoToken(url) && !body.trim() ? " token-gated exp=xpe" : "";
       failures.push(`${language}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`);
@@ -1960,15 +2060,24 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
   throw new Error(`${source}: tracks=${tracks.length}; ${failures.slice(0, 3).join(" | ") || "no usable baseUrl"}`);
 }
 
-async function loadOfficialRows(videoId: string) {
+async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: boolean } = {}) {
+  addDebugLog("official:start", { videoId, includeSlowPaths: Boolean(options.includeSlowPaths) });
   const snapshot = await readPlayerSnapshotViaBackground();
   const playerResponse = snapshot?.playerResponse ?? parsePlayerResponseFromScripts() ?? await fetchPlayerResponseFromPage();
   const tracks = uniqueTracks([
     ...(snapshot?.captionTracks ?? []),
     ...tracksFromPlayerResponse(playerResponse)
   ]);
+  addDebugLog("official:snapshot", {
+    snapshotTracks: snapshot?.captionTracks?.length ?? 0,
+    playerTracks: tracksFromPlayerResponse(playerResponse).length,
+    mergedTracks: tracks.length,
+    transcriptParams: snapshot?.transcriptParams?.length ?? 0
+  });
   try {
-    return loadRowsFromCapturedTimedText(videoId);
+    const capturedRows = loadRowsFromCapturedTimedText(videoId);
+    addDebugLog("official:captured-success", { rows: capturedRows.length });
+    return capturedRows;
   } catch {
     // Captured timedtext is opportunistic; continue with official APIs.
   }
@@ -1991,19 +2100,21 @@ async function loadOfficialRows(videoId: string) {
     // A late page/player request may have been captured while official APIs were attempted.
   }
 
-  try {
-    return await loadRowsFromTranscriptPanel(videoId);
-  } catch (error) {
-    runtime.__yllSafeLastFailure = `${runtime.__yllSafeLastFailure ?? "official failed"}; transcriptPanel: ${toErrorMessage(error)}`;
-  }
+  if (options.includeSlowPaths) {
+    try {
+      return await loadRowsFromTranscriptPanel(videoId);
+    } catch (error) {
+      runtime.__yllSafeLastFailure = `${runtime.__yllSafeLastFailure ?? "official failed"}; transcriptPanel: ${toErrorMessage(error)}`;
+    }
 
-  try {
-    return await loadRowsViaPlayerRequest(videoId, uniqueTracks([
-      ...(snapshot?.playerCaptionTracks ?? []),
-      ...tracks
-    ]));
-  } catch (error) {
-    runtime.__yllSafeLastFailure = `${runtime.__yllSafeLastFailure ?? "official failed"}; playerLoad: ${toErrorMessage(error)}`;
+    try {
+      return await loadRowsViaPlayerRequest(videoId, uniqueTracks([
+        ...(snapshot?.playerCaptionTracks ?? []),
+        ...tracks
+      ]));
+    } catch (error) {
+      runtime.__yllSafeLastFailure = `${runtime.__yllSafeLastFailure ?? "official failed"}; playerLoad: ${toErrorMessage(error)}`;
+    }
   }
 
   const youtubeiPlayerResponse = await readPlayerResponseViaYoutubei(videoId, snapshot);
@@ -2132,9 +2243,9 @@ function readVisibleCaptionCue(allowHiddenCaptions = false) {
 
 function sanitizeVisibleCaptionText(text: string) {
   return cleanText(text
-    .replace(/\b(?:English|英语)\s*[（(]\s*(?:auto-generated|自动生成)\s*[）)]\s*(?:Click|点击)?\s*(?:Settings|查看设置)?/gi, " ")
-    .replace(/\b(?:Click|点击)\s*(?:Settings|查看设置)\b/gi, " ")
-    .replace(/\b(?:English|英语)\b\s*$/gi, " ")
+    .replace(/(?:English|英语)\s*[（(]\s*(?:auto-generated|自动生成)\s*[）)]\s*(?:Click|点击)?\s*(?:Settings|查看设置)?/gi, " ")
+    .replace(/(?:Click|点击)\s*(?:Settings|查看设置)/gi, " ")
+    .replace(/(?:English|英语)\s*$/gi, " ")
     .replace(/\s+/g, " "));
 }
 
@@ -2161,7 +2272,11 @@ async function loadRowsForCurrentVideo() {
   const hasOfficialRows = rows.some((cue) => cue.source !== "visible");
   if (runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRows) return;
   const now = Date.now();
-  if (rows.length && !hasOfficialRows && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < OFFICIAL_RETRY_MS) {
+  if (!hasOfficialRows && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < OFFICIAL_RETRY_MS) {
+    addDebugLog("load:cooldown", {
+      rows: rows.length,
+      waitMs: OFFICIAL_RETRY_MS - (now - runtime.__yllSafeLastOfficialAttemptAt)
+    });
     return;
   }
 
@@ -2172,6 +2287,7 @@ async function loadRowsForCurrentVideo() {
   runtime.__yllSafeLastOfficialAttemptAt = now;
   runtime.__yllSafeOfficialAttemptCount = (runtime.__yllSafeOfficialAttemptCount ?? 0) + 1;
   runtime.__yllSafeLastOfficialDebug = [];
+  addDebugLog("load:start", { videoId, pass: runtime.__yllSafeOfficialAttemptCount, existingRows: rows.length, hasOfficialRows });
   if (!rows.length || hasOfficialRows) {
     runtime.__yllSafeRows = [];
     runtime.__yllSafeActiveKey = undefined;
@@ -2186,10 +2302,12 @@ async function loadRowsForCurrentVideo() {
     runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
   });
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    setStatus(`正在读取官方字幕轨道... ${attempt + 1}/8`);
+  for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
+    setStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`);
     try {
-      const officialRows = await loadOfficialRows(videoId);
+      addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS });
+      const officialRows = await withTimeout(loadOfficialRows(videoId), OFFICIAL_ATTEMPT_TIMEOUT_MS, "official auto attempt");
+      addDebugLog("load:official-result", { rows: officialRows.length, sources: Array.from(new Set(officialRows.map((row) => row.source))) });
       if (officialRows.length) {
         const sourceLabel =
           officialRows.some((row) => row.source === "transcript-panel") ? "YouTube Transcript 面板" :
@@ -2200,11 +2318,13 @@ async function loadRowsForCurrentVideo() {
         runtime.__yllSafeLoadingVideoId = undefined;
         runtime.__yllSafeLoadedVideoId = videoId;
         runtime.__yllSafeLastOfficialDebug = [`success:${sourceLabel}:${officialRows.length}`];
+        addDebugLog("load:official-success", { sourceLabel, rows: officialRows.length });
         return;
       }
     } catch (error) {
       runtime.__yllSafeLastFailure = `official: ${toErrorMessage(error)}`;
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
+      addDebugLog("load:official-error", { attempt: attempt + 1, error: toErrorMessage(error) });
     }
 
     try {
@@ -2215,6 +2335,7 @@ async function loadRowsForCurrentVideo() {
         runtime.__yllSafeLoadingVideoId = undefined;
         runtime.__yllSafeLoadedVideoId = videoId;
         runtime.__yllSafeLastOfficialDebug = [`success:video.textTracks:${textTrackRows.length}`];
+        addDebugLog("load:text-track-success", { rows: textTrackRows.length });
         return;
       }
     } catch (error) {
@@ -2230,6 +2351,7 @@ async function loadRowsForCurrentVideo() {
         runtime.__yllSafeLoadingVideoId = undefined;
         runtime.__yllSafeLoadedVideoId = videoId;
         runtime.__yllSafeLastOfficialDebug = [`success:directTimedText:${directRows.length}`];
+        addDebugLog("load:direct-timedtext-success", { rows: directRows.length });
         return;
       }
     } catch (error) {
@@ -2245,6 +2367,7 @@ async function loadRowsForCurrentVideo() {
   runtime.__yllSafeCanUseVisibleFallback = true;
   ensureNativeCaptionsForFallback();
   const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
+  addDebugLog("load:fallback-enabled", { debug });
   setStatus(`官方字幕暂未读到，稍后会自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`);
 }
 
@@ -2254,6 +2377,7 @@ function captureVisibleFallback() {
   ensureNativeCaptionsForFallback();
   const cue = readVisibleCaptionCue(true);
   if (!cue) return;
+  addDebugLog("fallback:cue", { startMs: cue.startMs, text: cue.text.slice(0, 90) });
   setOverlayCue(cue);
   const rows = runtime.__yllSafeRows ?? [];
   cue.text = compactRepeatedPhrases(cue.text);
@@ -2302,7 +2426,8 @@ function tick() {
       runtime.__yllSafeOfficialAttemptCount = undefined;
       runtime.__yllSafeLastOfficialDebug = undefined;
       document.getElementById(WORD_POPOVER_ID)?.remove();
-      document.getElementById(SETTINGS_PANEL_ID)?.remove();
+    document.getElementById(SETTINGS_PANEL_ID)?.remove();
+    document.getElementById(DEBUG_PANEL_ID)?.remove();
       document.getElementById(PRACTICE_ID)?.remove();
       return;
     }
@@ -2344,6 +2469,7 @@ function tick() {
 }
 
 function start() {
+  runtime.__yllSafeDebugSnapshot = debugSnapshot;
   if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
   tick();
   runtime.__yllSafeTimer = window.setInterval(tick, POLL_MS);

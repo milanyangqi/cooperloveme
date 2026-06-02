@@ -120,8 +120,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.58 待审核</strong>
-          <p>官方重试加入冷却，避免刚启用 fallback 又被读取任务抢掉。</p>
+          <strong>0.1.66 待审核</strong>
+          <p>修复查词弹窗在收藏前被自动隐藏的问题。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

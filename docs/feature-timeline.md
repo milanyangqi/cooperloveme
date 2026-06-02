@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-02 14:24:02 CST
+Last updated: 2026-06-02 17:52:27 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -19,31 +19,89 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
 | Official YouTube caption loading | Done | 2026-06-02 13:08 CST | `0.1.58` Chrome runtime test loaded 267 official rows and 267 translated rows | Must remain the primary path. Diagnostic logs stay available for future failures. |
-| Caption fallback from visible CC | Partial | 2026-06-02 12:31 CST | `0.1.56` falls back after fast official attempts finish | Native CC must be hidden while fallback/plugin subtitles show. |
+| Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | Done | 2026-06-02 | Runtime check showed native visible count 0 | Keep default enabled to avoid duplicate subtitle overlays. |
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
-| Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-02 12:03 CST | Local build `0.1.54` passed typecheck/build | Needs manual Chrome reload and visual review. |
-| Adjacent duplicate caption filtering | Done | 2026-06-02 | Added near-time same-text filter | Only removes identical neighboring rows within 3 seconds. |
-| Bilingual overlay on video | Partial | 2026-06-02 | Runtime test showed bilingual overlay visible | Timing and duration still need tuning. |
+| Right-side newest-on-top / upward scroll behavior | Done | 2026-06-02 14:57 CST | Chrome runtime test on `0.1.60` loaded 109 official rows with current row highlighted | Active row scrolls with time; mouse scroll remains available. |
+| Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
+| Bilingual overlay on video | Done | 2026-06-02 14:57 CST | Chrome screenshot on `0.1.60` showed plugin bilingual overlay and native CC count 0 | Position is usable; further style tuning still planned. |
 | Free translation fallback | Done | 2026-06-02 | Runtime test generated 289 translated rows | Uses free translation path before paid AI configuration. |
 | Click word for translation | Partial | 2026-06-02 | Word spans and popover implemented | Needs broader UX review and vocabulary save flow. |
-| Subtitle settings panel | Partial | 2026-06-02 | Hide native CC, show translation, position, font size controls exist | Needs full Relingo-style settings expansion. |
-| Practice mode shell | Partial | 2026-06-02 | Lightweight practice overlay exists | Needs full Trancy-style mode restoration and real scoring behavior. |
-| Shadowing / follow-read | Planned | Pending | Not fully restored | Needs mic flow, replay current sentence, scoring, and save attempt. |
-| Dictation mode | Planned | Pending | Not fully restored | Needs sentence playback, input, compare, and retry. |
-| Cloze / fill blank mode | Planned | Pending | Not fully restored | Needs generated blanks and answer validation. |
-| Comprehension quiz mode | Planned | Pending | Not fully restored | Needs question generation and answer feedback. |
-| Sentence save / collection | Partial | 2026-06-01 | Background storage APIs exist | Needs current lightweight panel buttons wired to library UX. |
-| Vocabulary library | Partial | 2026-06-01 | Background storage APIs exist | Needs word lookup to save vocabulary cleanly. |
+| Subtitle settings panel | In Review | 2026-06-02 15:20 CST | `0.1.62` restores subtitle mode, opacity, source/translation font controls | Needs manual Chrome review; advanced highlight-style editor still planned. |
+| Practice mode shell | In Review | 2026-06-02 15:32 CST | `0.1.63` restores mode tabs, sentence navigation, replay, and feedback | Needs manual Chrome review; full Trancy-style layout still planned. |
+| Shadowing / follow-read | Partial | 2026-06-02 15:32 CST | `0.1.63` can replay current sentence for follow-read | Mic flow, scoring, and save attempt still pending. |
+| Dictation mode | Partial | 2026-06-02 15:32 CST | `0.1.63` adds dictation input and local word-match score | Needs better diff display and retry records. |
+| Cloze / fill blank mode | Partial | 2026-06-02 15:32 CST | `0.1.63` adds generated blanks and reveal answer | Needs typed answer validation. |
+| Comprehension quiz mode | Partial | 2026-06-02 15:32 CST | `0.1.63` adds translation-choice quiz from nearby subtitles | Needs generated questions and richer feedback. |
+| Sentence save / collection | In Review | 2026-06-02 15:43 CST | `0.1.64` wires practice current sentence save to `SAVE_SENTENCE` | Needs manual Chrome review and visible library count refresh. |
+| Vocabulary library | In Review | 2026-06-02 17:52 CST | `0.1.66` keeps word lookup popover open for save clicks | Needs reload and re-test after popover click-propagation fix. |
 | Export / Anki / CSV | Planned | Pending | Export bundle exists, advanced export not restored | Planned for Pro/high-value workflow. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
+| Caption diagnostics panel | In Review | 2026-06-02 15:01 CST | `0.1.61` docks diagnostics inside the subtitle panel | Keeps debug logs available without covering video/recommendations. |
+| Stale content-script protection | In Review | 2026-06-02 17:33 CST | `0.1.65` adds version broadcast and old-instance cleanup | Future versions can stop older in-page script instances; already-stale pre-0.1.65 pages still need popup wake or tab reopen. |
 
 ## Timeline
 
 ### 2026-06-02
 
+- Local `0.1.66` word popover save fix:
+  - Chrome review showed `0.1.65` loaded after page refresh and official captions worked
+  - settings panel, practice tabs, cloze, quiz, and dictation feedback were visible
+  - word lookup popover showed a save button, but the popover became hidden before save could trigger
+  - added click and mousedown propagation guards to the word popover and save button
+  - pending extension reload and Chrome re-test
+- Local `0.1.65` stale script guard:
+  - documented stale content-script verification rules in `AGENTS.md`
+  - added version broadcast event when the content script starts
+  - added stop cleanup for older in-page script instances when a newer version announces itself
+  - synchronized popup and manifest versions
+  - pending extension reload and manual Chrome review
+- Local `0.1.64` local library recovery:
+  - added current sentence save from the practice panel
+  - added word save button inside the word lookup popover
+  - saves sentence and vocabulary through existing background storage APIs
+  - pending extension reload and manual Chrome review
+- Local `0.1.63` practice mode recovery:
+  - added practice mode tabs for shadowing, dictation, cloze, and quiz
+  - added previous/next sentence navigation
+  - added current-sentence replay with automatic stop near cue end
+  - added dictation word-match score
+  - added cloze reveal answer
+  - added translation-choice comprehension quiz
+  - pending extension reload and manual Chrome review
+- Local `0.1.62` subtitle settings recovery:
+  - restored subtitle mode selector: dual, source only, translation only
+  - added background opacity control
+  - added original subtitle font size and font family controls
+  - added translated subtitle font size and font family controls
+  - settings are backward-compatible with existing local storage
+  - pending extension reload and manual visual review
+- Local `0.1.61` diagnostics UI recovery:
+  - moved the diagnostic log panel inside the extension panel
+  - reduced max height so debugging does not block the video or right-side caption list
+  - pending extension reload and Chrome visual review
+- Verified local `0.1.60` after extension reload:
+  - Chrome page was running `0.1.60`
+  - loaded 109 rows from official caption track
+  - generated Chinese translations
+  - native YouTube CC visible count was 0
+  - bottom plugin bilingual overlay was visible
+  - right-side active row tracked current playback time
+- Local `0.1.60` fallback stability fix after Chrome takeover:
+  - verified `0.1.59` was loaded in Chrome
+  - found the current BBC video stayed on visible-caption fallback instead of official captions
+  - found official retry loops could clear the right-side list and reveal native YouTube CC during retry
+  - changed official retry cadence to 45s while fallback is active
+  - kept fallback collection and native-caption hiding active during background official retries
+  - widened fallback duplicate detection to catch highly similar rolling captions up to 14s apart
+  - pending extension reload and Chrome visual review
+- Local `0.1.59` duplicate and overlay recovery:
+  - added overlap-aware caption text combination so rolling YouTube captions do not repeat the previous tail
+  - added near-time similarity filtering for neighboring rows with highly overlapping text
+  - raised minimum plugin overlay display duration from 2.2s to 3.2s to reduce short subtitle flashes
+  - pending manual extension reload and Chrome visual review
 - Local `0.1.58` bug fix from diagnostic logs:
   - confirmed `0.1.57` eventually loaded 354 official rows on the tested video
   - found repeated `load:start` loops immediately after fallback activation when no rows existed yet
@@ -95,8 +153,8 @@ This file is the project memory for feature recovery. Update it whenever a featu
 
 ## Next Recovery Order
 
-1. Manually review `0.1.58` right-side newest-on-top behavior after extension reload.
-2. Tune overlay timing so subtitles do not flash too briefly.
+1. Manually review `0.1.59` duplicate filtering, right-side newest-on-top behavior, and overlay display duration after extension reload.
+2. Tune overlay position if the video subtitle still feels too high or too low.
 3. Expand settings panel toward the reference UI:
    - subtitle mode
    - subtitle position

@@ -4,7 +4,9 @@
 
 - Keep `docs/feature-timeline.md` updated. Whenever a feature is completed, restored, paused, or regressed, add a timestamped note with validation status.
 - Protect the official YouTube caption loading path first. Fallback CC collection is only a temporary display path and must not block later official-track retries.
-- After rebuilding the unpacked Chrome extension, reload the extension in `chrome://extensions`, then refresh the YouTube watch page. A page refresh alone can keep an old content script alive.
+- After rebuilding the unpacked Chrome extension, reload the extension in `chrome://extensions`, then force the YouTube watch page to run the new content script. A page refresh alone can keep an old content script timer alive.
+- Before judging any browser result, verify the in-page panel `data-yll-version` matches `public/manifest.json` / `SCRIPT_VERSION`. If popup shows a newer version but the page panel is older, the page is stale; do not debug product behavior until the page script is current.
+- To replace a stale page script, prefer clicking the popup's `唤醒面板` or `重读字幕` action after extension reload. If the panel version is still old, close/reopen the YouTube watch tab or navigate away and back to force a fresh content-script instance.
 - Before pushing caption-related changes, run:
   - `npm run typecheck`
   - `npm run build`

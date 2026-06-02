@@ -74,29 +74,42 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.58";
+const SCRIPT_VERSION = "0.1.66";
 const POLL_MS = 500;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 350;
-const MIN_OVERLAY_DURATION_MS = 2200;
+const MIN_OVERLAY_DURATION_MS = 3200;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
+const OFFICIAL_FALLBACK_RETRY_MS = 45000;
 const OFFICIAL_AUTO_ATTEMPTS = 2;
 const OFFICIAL_ATTEMPT_TIMEOUT_MS = 5000;
 
 type SafeSettings = {
   hideNativeCaptions: boolean;
   showTranslations: boolean;
+  subtitleMode: "dual" | "source" | "translation";
   overlayPositionPercent: number;
   overlayFontSize: number;
+  translationFontSize: number;
+  overlayBackgroundOpacity: number;
+  sourceFontFamily: string;
+  translationFontFamily: string;
 };
+
+type SubtitleMode = SafeSettings["subtitleMode"];
 
 const DEFAULT_SETTINGS: SafeSettings = {
   hideNativeCaptions: true,
   showTranslations: true,
+  subtitleMode: "dual",
   overlayPositionPercent: 82,
-  overlayFontSize: 24
+  overlayFontSize: 24,
+  translationFontSize: 20,
+  overlayBackgroundOpacity: 72,
+  sourceFontFamily: "system-ui",
+  translationFontFamily: "system-ui"
 };
 
 const runtime = window as typeof window & {
@@ -111,10 +124,12 @@ const runtime = window as typeof window & {
   __yllSafeIsTranslating?: boolean;
   __yllSafeSettings?: SafeSettings;
   __yllSafeScriptVersion?: string;
+  __yllSafeStopCurrentScript?: () => void;
   __yllSafeIsLoadingOfficial?: boolean;
   __yllSafeCanUseVisibleFallback?: boolean;
   __yllSafeLastFailure?: string;
   __yllSafeLastOfficialAttemptAt?: number;
+  __yllSafeLastOfficialFailureAt?: number;
   __yllSafeOfficialAttemptCount?: number;
   __yllSafeLastOfficialDebug?: string[];
   __yllSafeDebugLog?: string[];
@@ -144,6 +159,48 @@ function isWatchPage() {
 function getVideoId() {
   return new URL(location.href).searchParams.get("v") ?? "";
 }
+
+function compareSemverish(left: string, right: string) {
+  const leftParts = left.split(".").map((part) => Number(part) || 0);
+  const rightParts = right.split(".").map((part) => Number(part) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+function stopCurrentScriptInstance() {
+  if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
+  runtime.__yllSafeTimer = undefined;
+  runtime.__yllSafeLoadingVideoId = undefined;
+  runtime.__yllSafeIsLoadingOfficial = false;
+  runtime.__yllSafeCanUseVisibleFallback = false;
+  document.getElementById(PANEL_ID)?.remove();
+  document.getElementById(OVERLAY_ID)?.remove();
+  document.getElementById(WORD_POPOVER_ID)?.remove();
+  document.getElementById(SETTINGS_PANEL_ID)?.remove();
+  document.getElementById(PRACTICE_ID)?.remove();
+  document.getElementById(DEBUG_PANEL_ID)?.remove();
+  document.documentElement.classList.remove("yll-hide-native-captions");
+}
+
+function announceScriptVersion() {
+  runtime.__yllSafeScriptVersion = SCRIPT_VERSION;
+  runtime.__yllSafeStopCurrentScript = stopCurrentScriptInstance;
+  try {
+    window.dispatchEvent(new CustomEvent("yll-safe-version-active", { detail: { version: SCRIPT_VERSION } }));
+  } catch {
+    // Browser event creation can fail in unusual execution worlds; the runtime guard above still helps.
+  }
+}
+
+window.addEventListener("yll-safe-version-active", (event) => {
+  const version = String((event as CustomEvent<{ version?: string }>).detail?.version ?? "");
+  if (!version || version === SCRIPT_VERSION) return;
+  if (compareSemverish(version, SCRIPT_VERSION) > 0) stopCurrentScriptInstance();
+});
 
 function installTimedTextCaptureListener() {
   if (runtime.__yllTimedTextBridgeListening) return;
@@ -217,20 +274,42 @@ function escapeHtml(text: string) {
   return text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char] ?? char);
 }
 
+function cssFontFamily(value: string) {
+  if (value === "serif") return "Georgia, 'Times New Roman', serif";
+  if (value === "sans-serif") return "Arial, Helvetica, sans-serif";
+  if (value === "monospace") return "'SFMono-Regular', Menlo, Consolas, monospace";
+  return "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+}
+
+function parseSubtitleMode(value: unknown): SubtitleMode {
+  return value === "source" || value === "translation" || value === "dual" ? value : DEFAULT_SETTINGS.subtitleMode;
+}
+
+function parseFontFamily(value: unknown) {
+  return value === "system-ui" || value === "serif" || value === "sans-serif" || value === "monospace" ? value : DEFAULT_SETTINGS.sourceFontFamily;
+}
+
 function loadSafeSettings(): SafeSettings {
   if (runtime.__yllSafeSettings) return runtime.__yllSafeSettings;
+  let settings: SafeSettings;
   try {
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") as Partial<SafeSettings>;
-    runtime.__yllSafeSettings = {
+    settings = {
       ...DEFAULT_SETTINGS,
       ...stored,
+      subtitleMode: parseSubtitleMode(stored.subtitleMode),
       overlayPositionPercent: Math.min(94, Math.max(50, Number(stored.overlayPositionPercent ?? DEFAULT_SETTINGS.overlayPositionPercent))),
-      overlayFontSize: Math.min(42, Math.max(16, Number(stored.overlayFontSize ?? DEFAULT_SETTINGS.overlayFontSize)))
+      overlayFontSize: Math.min(42, Math.max(16, Number(stored.overlayFontSize ?? DEFAULT_SETTINGS.overlayFontSize))),
+      translationFontSize: Math.min(36, Math.max(14, Number(stored.translationFontSize ?? DEFAULT_SETTINGS.translationFontSize))),
+      overlayBackgroundOpacity: Math.min(95, Math.max(20, Number(stored.overlayBackgroundOpacity ?? DEFAULT_SETTINGS.overlayBackgroundOpacity))),
+      sourceFontFamily: parseFontFamily(stored.sourceFontFamily),
+      translationFontFamily: parseFontFamily(stored.translationFontFamily)
     };
   } catch {
-    runtime.__yllSafeSettings = DEFAULT_SETTINGS;
+    settings = DEFAULT_SETTINGS;
   }
-  return runtime.__yllSafeSettings;
+  runtime.__yllSafeSettings = settings;
+  return settings;
 }
 
 function saveSafeSettings(settings: SafeSettings) {
@@ -286,6 +365,54 @@ function translationKey(cue: LabCue) {
 
 function normalizeForCompare(text: string) {
   return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizedWords(text: string) {
+  return normalizeForCompare(text).split(" ").filter(Boolean);
+}
+
+function wordContainmentScore(a: string, b: string) {
+  const aWords = normalizedWords(a);
+  const bWords = normalizedWords(b);
+  if (!aWords.length || !bWords.length) return 0;
+  const shorter = aWords.length <= bWords.length ? aWords : bWords;
+  const longer = aWords.length <= bWords.length ? bWords : aWords;
+  let matched = 0;
+  const used = new Set<number>();
+  for (const word of shorter) {
+    const index = longer.findIndex((candidate, candidateIndex) => candidate === word && !used.has(candidateIndex));
+    if (index >= 0) {
+      used.add(index);
+      matched += 1;
+    }
+  }
+  return matched / shorter.length;
+}
+
+function combineOverlappingText(left: string, right: string) {
+  const leftWords = cleanText(left).split(" ").filter(Boolean);
+  const rightWords = cleanText(right).split(" ").filter(Boolean);
+  if (!leftWords.length) return rightWords.join(" ");
+  if (!rightWords.length) return leftWords.join(" ");
+
+  const leftNorm = leftWords.map(normalizeForCompare);
+  const rightNorm = rightWords.map(normalizeForCompare);
+  const leftJoined = leftNorm.join(" ");
+  const rightJoined = rightNorm.join(" ");
+  if (leftJoined === rightJoined) return leftWords.length >= rightWords.length ? leftWords.join(" ") : rightWords.join(" ");
+  if (leftJoined.includes(rightJoined)) return leftWords.join(" ");
+  if (rightJoined.includes(leftJoined)) return rightWords.join(" ");
+
+  const maxOverlap = Math.min(leftWords.length, rightWords.length);
+  for (let size = maxOverlap; size >= 2; size -= 1) {
+    const leftTail = leftNorm.slice(leftNorm.length - size).join(" ");
+    const rightHead = rightNorm.slice(0, size).join(" ");
+    if (leftTail && leftTail === rightHead) {
+      return [...leftWords, ...rightWords.slice(size)].join(" ");
+    }
+  }
+
+  return `${leftWords.join(" ")} ${rightWords.join(" ")}`;
 }
 
 function compactRepeatedPhrases(text: string) {
@@ -348,7 +475,7 @@ function mergeAdjacentCues(cues: LabCue[]) {
 
     const currentEndMs = current.startMs + current.durationMs;
     const gapMs = nextCue.startMs - currentEndMs;
-    const combinedText = compactRepeatedPhrases(`${current.text} ${nextCue.text}`);
+    const combinedText = compactRepeatedPhrases(combineOverlappingText(current.text, nextCue.text));
     const combinedDurationMs = Math.max(current.durationMs, nextCue.startMs + nextCue.durationMs - current.startMs);
     const shouldCommitBeforeNext =
       gapMs > 850 ||
@@ -528,6 +655,17 @@ function installStyle() {
     }
     #${WORD_POPOVER_ID} strong { display: block; margin-bottom: 4px; color: #ffc857; }
     #${WORD_POPOVER_ID} p { margin: 0; color: #d7dbe1; }
+    #${WORD_POPOVER_ID} button {
+      margin-top: 10px;
+      height: 30px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      color: #151515;
+      background: #ffc857;
+      font-weight: 750;
+      cursor: pointer;
+    }
     #${SETTINGS_PANEL_ID} {
       position: fixed;
       z-index: 2147483647;
@@ -535,6 +673,7 @@ function installStyle() {
       top: 76px;
       width: 300px;
       max-width: calc(100vw - 430px);
+      max-height: calc(100dvh - 112px);
       padding: 14px;
       color: #f7f8f8;
       background: #25282c;
@@ -542,8 +681,16 @@ function installStyle() {
       border-radius: 8px;
       box-shadow: 0 14px 34px rgba(0,0,0,.34);
       font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-y: auto;
     }
     #${SETTINGS_PANEL_ID} h3 { margin: 0 0 10px; font-size: 15px; }
+    #${SETTINGS_PANEL_ID} h4 {
+      margin: 14px 0 6px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,.12);
+      color: #ffc857;
+      font-size: 13px;
+    }
     #${SETTINGS_PANEL_ID} label {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -553,21 +700,25 @@ function installStyle() {
       border-top: 1px solid rgba(255,255,255,.09);
     }
     #${SETTINGS_PANEL_ID} input[type="range"] { width: 120px; }
+    #${SETTINGS_PANEL_ID} select {
+      min-width: 112px;
+      height: 28px;
+      color: #f7f8f8;
+      background: #2d3034;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 6px;
+      padding: 0 6px;
+    }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
     #${DEBUG_PANEL_ID} {
-      position: fixed;
-      z-index: 2147483647;
-      right: 394px;
-      top: 76px;
-      width: 420px;
-      max-width: calc(100vw - 430px);
-      max-height: 70vh;
-      padding: 12px;
+      flex: 0 0 auto;
+      max-height: 220px;
+      margin: 8px 12px 12px;
+      padding: 10px;
       color: #f7f8f8;
       background: #202224;
       border: 1px solid rgba(255,255,255,.16);
       border-radius: 8px;
-      box-shadow: 0 12px 30px rgba(0,0,0,.32);
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       overflow: auto;
       white-space: pre-wrap;
@@ -602,13 +753,48 @@ function installStyle() {
       align-items: center;
     }
     #${PRACTICE_ID} h2 { margin: 0; font-size: 18px; }
+    #${PRACTICE_ID} .yll-practice-tabs,
     #${PRACTICE_ID} .yll-practice-sentence {
       margin: 20px 0 10px;
       font-size: 28px;
       font-weight: 760;
       line-height: 1.35;
     }
+    #${PRACTICE_ID} .yll-practice-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 14px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    #${PRACTICE_ID} .yll-practice-tabs button.is-active {
+      color: #151515;
+      background: #ffc857;
+      border: 0;
+    }
+    #${PRACTICE_ID} .yll-practice-prompt {
+      margin: 8px 0 10px;
+      color: #cfd4dc;
+    }
     #${PRACTICE_ID} .yll-practice-translation { color: #f5e86e; font-size: 20px; }
+    #${PRACTICE_ID} .yll-practice-feedback {
+      min-height: 24px;
+      margin-top: 10px;
+      color: #ffc857;
+      font-weight: 750;
+    }
+    #${PRACTICE_ID} .yll-practice-options {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    #${PRACTICE_ID} .yll-practice-option {
+      height: auto;
+      min-height: 42px;
+      padding: 10px 12px;
+      text-align: left;
+    }
     #${PRACTICE_ID} textarea {
       width: 100%;
       min-height: 100px;
@@ -659,12 +845,16 @@ function installStyle() {
       opacity: 0;
     }
     #${OVERLAY_ID}.is-visible { opacity: 1; }
-    #${OVERLAY_ID} .yll-overlay-source { display: block; }
+    #${OVERLAY_ID} .yll-overlay-source {
+      display: block;
+      font-family: var(--yll-source-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    }
     #${OVERLAY_ID} .yll-overlay-translation {
       display: block;
       margin-top: 4px;
       color: #f5e86e;
-      font-size: 20px;
+      font-family: var(--yll-translation-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      font-size: var(--yll-translation-size, 20px);
       font-weight: 650;
     }
     html.yll-hide-native-captions .ytp-caption-window-container,
@@ -783,7 +973,7 @@ function toggleDebugPanel() {
   }
   const panel = document.createElement("section");
   panel.id = DEBUG_PANEL_ID;
-  document.documentElement.appendChild(panel);
+  (document.getElementById(PANEL_ID) ?? document.documentElement).appendChild(panel);
   renderDebugPanel();
 }
 
@@ -813,6 +1003,8 @@ function mountWordPopover() {
   popover = document.createElement("div");
   popover.id = WORD_POPOVER_ID;
   popover.hidden = true;
+  popover.addEventListener("click", (event) => event.stopPropagation());
+  popover.addEventListener("mousedown", (event) => event.stopPropagation());
   document.documentElement.appendChild(popover);
   document.addEventListener("click", (event) => {
     if (!popover || popover.hidden) return;
@@ -823,10 +1015,22 @@ function mountWordPopover() {
   return popover;
 }
 
-function showWordPopover(word: string, message: string) {
+function showWordPopover(word: string, message: string, options: { canSave?: boolean; startMs?: number; meaning?: string } = {}) {
   const popover = mountWordPopover();
   popover.hidden = false;
-  popover.innerHTML = `<strong>${escapeHtml(word)}</strong><p>${escapeHtml(message)}</p>`;
+  popover.innerHTML = `
+    <strong>${escapeHtml(word)}</strong>
+    <p>${escapeHtml(message)}</p>
+    ${options.canSave ? `<button type="button" data-save-vocab data-word="${escapeHtml(word)}" data-start="${options.startMs ?? 0}" data-meaning="${escapeHtml(options.meaning ?? "")}">收藏单词</button>` : ""}
+  `;
+  popover.querySelector<HTMLElement>("[data-save-vocab]")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const button = event.currentTarget as HTMLElement;
+    button.textContent = "保存中...";
+    const result = await saveVocabulary(button.dataset.word ?? word, Number(button.dataset.start ?? "0"), button.dataset.meaning ?? options.meaning ?? "");
+    button.textContent = result ? "已收藏" : "收藏失败";
+  });
 }
 
 function toggleSettingsPanel() {
@@ -850,6 +1054,7 @@ function renderSettingsPanel() {
 function settingsPanelHtml(settings: SafeSettings) {
   return `
     <h3>视频字幕</h3>
+    <h4>字幕功能</h4>
     <label>
       <span>隐藏 YouTube 原生字幕</span>
       <input type="checkbox" data-setting="hideNativeCaptions" ${settings.hideNativeCaptions ? "checked" : ""}>
@@ -859,26 +1064,65 @@ function settingsPanelHtml(settings: SafeSettings) {
       <input type="checkbox" data-setting="showTranslations" ${settings.showTranslations ? "checked" : ""}>
     </label>
     <label>
+      <span>字幕模式</span>
+      <select data-setting="subtitleMode">
+        <option value="dual" ${settings.subtitleMode === "dual" ? "selected" : ""}>双语字幕</option>
+        <option value="source" ${settings.subtitleMode === "source" ? "selected" : ""}>主字幕</option>
+        <option value="translation" ${settings.subtitleMode === "translation" ? "selected" : ""}>翻译字幕</option>
+      </select>
+    </label>
+    <h4>位置与背景</h4>
+    <label>
       <span>字幕位置</span>
       <span><input type="range" min="50" max="94" step="1" data-setting="overlayPositionPercent" value="${settings.overlayPositionPercent}"> <span class="yll-setting-value">${settings.overlayPositionPercent}%</span></span>
     </label>
     <label>
+      <span>背景透明度</span>
+      <span><input type="range" min="20" max="95" step="1" data-setting="overlayBackgroundOpacity" value="${settings.overlayBackgroundOpacity}"> <span class="yll-setting-value">${settings.overlayBackgroundOpacity}%</span></span>
+    </label>
+    <h4>原字幕样式</h4>
+    <label>
       <span>原文字号</span>
       <span><input type="range" min="16" max="42" step="1" data-setting="overlayFontSize" value="${settings.overlayFontSize}"> <span class="yll-setting-value">${settings.overlayFontSize}px</span></span>
+    </label>
+    <label>
+      <span>原文字体</span>
+      <select data-setting="sourceFontFamily">
+        <option value="system-ui" ${settings.sourceFontFamily === "system-ui" ? "selected" : ""}>system</option>
+        <option value="sans-serif" ${settings.sourceFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
+        <option value="serif" ${settings.sourceFontFamily === "serif" ? "selected" : ""}>serif</option>
+        <option value="monospace" ${settings.sourceFontFamily === "monospace" ? "selected" : ""}>monospace</option>
+      </select>
+    </label>
+    <h4>译文样式</h4>
+    <label>
+      <span>译文字号</span>
+      <span><input type="range" min="14" max="36" step="1" data-setting="translationFontSize" value="${settings.translationFontSize}"> <span class="yll-setting-value">${settings.translationFontSize}px</span></span>
+    </label>
+    <label>
+      <span>译文字体</span>
+      <select data-setting="translationFontFamily">
+        <option value="system-ui" ${settings.translationFontFamily === "system-ui" ? "selected" : ""}>system</option>
+        <option value="sans-serif" ${settings.translationFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
+        <option value="serif" ${settings.translationFontFamily === "serif" ? "selected" : ""}>serif</option>
+        <option value="monospace" ${settings.translationFontFamily === "monospace" ? "selected" : ""}>monospace</option>
+      </select>
     </label>
   `;
 }
 
 function bindSettingsPanel(panel: HTMLElement) {
-  panel.querySelectorAll<HTMLInputElement>("input[data-setting]").forEach((input) => {
+  panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input[data-setting], select[data-setting]").forEach((input) => {
     input.addEventListener("input", () => {
       const current = loadSafeSettings();
       const key = input.dataset.setting as keyof SafeSettings;
       const next: SafeSettings = { ...current };
       if (input.type === "checkbox") {
-        (next[key] as boolean | number) = input.checked;
+        (next[key] as boolean | number | string) = (input as HTMLInputElement).checked;
+      } else if (input instanceof HTMLSelectElement) {
+        (next[key] as boolean | number | string) = input.value;
       } else {
-        (next[key] as boolean | number) = Number(input.value);
+        (next[key] as boolean | number | string) = Number(input.value);
       }
       saveSafeSettings(next);
     });
@@ -901,15 +1145,84 @@ function currentCue() {
   return rows.find((cue) => cueKey(cue) === activeKey) ?? rows[0];
 }
 
+async function saveSentenceNote(cue: LabCue) {
+  const videoId = getVideoId();
+  if (!videoId) return false;
+  const response = await sendRuntimeMessage({
+    type: "SAVE_SENTENCE",
+    payload: {
+      videoId,
+      cueId: cueKey(cue),
+      text: cue.text,
+      translatedText: cue.translatedText,
+      language: "en",
+      startMs: cue.startMs,
+      durationMs: cue.durationMs,
+      isFavorite: true
+    }
+  });
+  return Boolean(response?.ok);
+}
+
+async function saveVocabulary(word: string, startMs: number, meaning?: string) {
+  const cue = (runtime.__yllSafeRows ?? [])
+    .slice()
+    .sort((a, b) => Math.abs(a.startMs - startMs) - Math.abs(b.startMs - startMs))[0];
+  const response = await sendRuntimeMessage({
+    type: "SAVE_VOCAB",
+    payload: {
+      text: cleanText(word).slice(0, 64),
+      language: "en",
+      meaning: meaning || undefined,
+      sourceSentence: cue?.text,
+      translatedSentence: cue?.translatedText,
+      videoId: getVideoId() || undefined,
+      cueId: cue ? cueKey(cue) : undefined
+    }
+  });
+  return Boolean(response?.ok);
+}
+
+function sortedPracticeRows() {
+  return [...(runtime.__yllSafeRows ?? [])].sort((a, b) => a.startMs - b.startMs);
+}
+
+function currentCueIndex(rows: LabCue[], cue: LabCue) {
+  const key = cueKey(cue);
+  return Math.max(0, rows.findIndex((row) => cueKey(row) === key));
+}
+
 function clozeText(text: string) {
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length < 4) return text.replace(/\S+/, "____");
   return words.map((word, index) => (index % 5 === 2 ? "____" : word)).join(" ");
 }
 
+function compareDictation(expected: string, actual: string) {
+  const expectedWords = normalizedWords(expected);
+  const actualWords = normalizedWords(actual);
+  if (!expectedWords.length || !actualWords.length) return 0;
+  const expectedSet = new Set(expectedWords);
+  const matched = actualWords.filter((word) => expectedSet.has(word)).length;
+  return Math.round(Math.min(100, (matched / expectedWords.length) * 100));
+}
+
+function quizOptions(rows: LabCue[], cue: LabCue) {
+  const candidates = rows
+    .filter((row) => row.translatedText && cueKey(row) !== cueKey(cue))
+    .sort((a, b) => Math.abs(a.startMs - cue.startMs) - Math.abs(b.startMs - cue.startMs))
+    .slice(0, 2)
+    .map((row) => row.translatedText?.trim() ?? "");
+  const answer = cue.translatedText?.trim() || cue.text;
+  return [answer, ...candidates]
+    .filter((text, index, all) => text && all.indexOf(text) === index)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function openPracticeOverlay() {
-  const cue = currentCue();
-  if (!cue) {
+  const rows = sortedPracticeRows();
+  const initialCue = currentCue();
+  if (!initialCue || !rows.length) {
     setStatus("还没有可练习的字幕句子。");
     return;
   }
@@ -918,48 +1231,110 @@ function openPracticeOverlay() {
   document.getElementById(PRACTICE_ID)?.remove();
   const overlay = document.createElement("section");
   overlay.id = PRACTICE_ID;
-  overlay.innerHTML = `
-    <div class="yll-practice-card">
-      <header class="yll-practice-head">
-        <div>
-          <h2>全屏混合练习</h2>
-          <span>${formatClock(cue.startMs)} · 跟读 / 听写 / 填空 / 理解选择</span>
-        </div>
-        <button type="button" data-practice-close>关闭</button>
-      </header>
-      <main>
-        <div class="yll-practice-sentence" data-practice-sentence>${escapeHtml(cue.text)}</div>
-        <div class="yll-practice-translation">${escapeHtml(cue.translatedText ?? "译文生成后会显示在这里")}</div>
-        <textarea placeholder="听写模式：在这里输入你听到的句子"></textarea>
-      </main>
-      <footer class="yll-practice-actions">
-        <button class="primary" type="button" data-practice-mode="shadowing">跟读当前句</button>
-        <button type="button" data-practice-mode="dictation">听写</button>
-        <button type="button" data-practice-mode="cloze">填空</button>
-        <button type="button" data-practice-mode="quiz">理解选择</button>
-        <button type="button" data-practice-replay>播放原声</button>
-      </footer>
-    </div>
-  `;
-  overlay.querySelector<HTMLElement>("[data-practice-close]")?.addEventListener("click", () => overlay.remove());
-  overlay.querySelector<HTMLElement>("[data-practice-replay]")?.addEventListener("click", () => {
+  let index = currentCueIndex(rows, initialCue);
+  let mode: "shadowing" | "dictation" | "cloze" | "quiz" = "shadowing";
+
+  const replayCue = () => {
+    const cue = rows[index];
     const player = getMainVideo();
     if (!player) return;
     player.currentTime = cue.startMs / 1000;
     void player.play();
-  });
-  overlay.querySelectorAll<HTMLElement>("[data-practice-mode]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const mode = button.dataset.practiceMode;
-      const sentence = overlay.querySelector<HTMLElement>("[data-practice-sentence]");
-      if (!sentence) return;
-      if (mode === "cloze") sentence.textContent = clozeText(cue.text);
-      if (mode === "dictation") sentence.textContent = "听原声，写下完整句子";
-      if (mode === "quiz") sentence.textContent = cue.translatedText ? `选择与译文匹配的原句：${cue.translatedText}` : "译文生成后可进行理解选择";
-      if (mode === "shadowing") sentence.textContent = cue.text;
+    const stopAt = (cue.startMs + Math.max(cue.durationMs, MIN_OVERLAY_DURATION_MS)) / 1000;
+    const timer = window.setInterval(() => {
+      if (!player || player.paused || player.currentTime < stopAt) return;
+      player.pause();
+      window.clearInterval(timer);
+    }, 120);
+  };
+
+  const renderPractice = () => {
+    const cue = rows[index];
+    const options = quizOptions(rows, cue);
+    overlay.innerHTML = `
+      <div class="yll-practice-card">
+        <header class="yll-practice-head">
+          <div>
+            <h2>全屏混合练习</h2>
+            <span>${formatClock(cue.startMs)} · ${index + 1} / ${rows.length}</span>
+          </div>
+          <button type="button" data-practice-close>关闭</button>
+        </header>
+        <main>
+          <div class="yll-practice-tabs">
+            <button type="button" data-practice-mode="shadowing" class="${mode === "shadowing" ? "is-active" : ""}">跟读</button>
+            <button type="button" data-practice-mode="dictation" class="${mode === "dictation" ? "is-active" : ""}">听写</button>
+            <button type="button" data-practice-mode="cloze" class="${mode === "cloze" ? "is-active" : ""}">填空</button>
+            <button type="button" data-practice-mode="quiz" class="${mode === "quiz" ? "is-active" : ""}">理解选择</button>
+          </div>
+          <div class="yll-practice-prompt">${practicePrompt(mode)}</div>
+          <div class="yll-practice-sentence" data-practice-sentence>${escapeHtml(mode === "cloze" ? clozeText(cue.text) : cue.text)}</div>
+          <div class="yll-practice-translation">${escapeHtml(cue.translatedText ?? "译文生成后会显示在这里")}</div>
+          ${mode === "dictation" ? `<textarea data-practice-answer placeholder="输入你听到的完整句子"></textarea>` : ""}
+          ${mode === "quiz" ? `<div class="yll-practice-options">${options.map((option) => `<button class="yll-practice-option" type="button" data-practice-option="${escapeHtml(option)}">${escapeHtml(option)}</button>`).join("")}</div>` : ""}
+          <div class="yll-practice-feedback" data-practice-feedback></div>
+        </main>
+        <footer class="yll-practice-actions">
+          <button type="button" data-practice-prev>上一句</button>
+          <button class="primary" type="button" data-practice-replay>播放当前句</button>
+          <button type="button" data-practice-next>下一句</button>
+          <button type="button" data-practice-save>收藏当前句</button>
+          ${mode === "dictation" ? `<button type="button" data-practice-check>检查听写</button>` : ""}
+          ${mode === "cloze" ? `<button type="button" data-practice-reveal>显示答案</button>` : ""}
+        </footer>
+      </div>
+    `;
+
+    overlay.querySelector<HTMLElement>("[data-practice-close]")?.addEventListener("click", () => overlay.remove());
+    overlay.querySelector<HTMLElement>("[data-practice-replay]")?.addEventListener("click", replayCue);
+    overlay.querySelector<HTMLElement>("[data-practice-save]")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget as HTMLElement;
+      button.textContent = "保存中...";
+      button.textContent = await saveSentenceNote(cue) ? "已收藏" : "收藏失败";
     });
-  });
+    overlay.querySelector<HTMLElement>("[data-practice-prev]")?.addEventListener("click", () => {
+      index = Math.max(0, index - 1);
+      renderPractice();
+    });
+    overlay.querySelector<HTMLElement>("[data-practice-next]")?.addEventListener("click", () => {
+      index = Math.min(rows.length - 1, index + 1);
+      renderPractice();
+    });
+    overlay.querySelectorAll<HTMLElement>("[data-practice-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        mode = (button.dataset.practiceMode as typeof mode) || "shadowing";
+        renderPractice();
+      });
+    });
+    overlay.querySelector<HTMLElement>("[data-practice-check]")?.addEventListener("click", () => {
+      const answer = overlay.querySelector<HTMLTextAreaElement>("[data-practice-answer]")?.value ?? "";
+      const score = compareDictation(cue.text, answer);
+      const feedback = overlay.querySelector<HTMLElement>("[data-practice-feedback]");
+      if (feedback) feedback.textContent = answer.trim() ? `听写匹配度 ${score}%` : "先输入你听到的句子。";
+    });
+    overlay.querySelector<HTMLElement>("[data-practice-reveal]")?.addEventListener("click", () => {
+      const sentence = overlay.querySelector<HTMLElement>("[data-practice-sentence]");
+      if (sentence) sentence.textContent = cue.text;
+    });
+    overlay.querySelectorAll<HTMLElement>("[data-practice-option]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const feedback = overlay.querySelector<HTMLElement>("[data-practice-feedback]");
+        const selected = button.dataset.practiceOption ?? "";
+        const answer = cue.translatedText?.trim() || cue.text;
+        if (feedback) feedback.textContent = selected === answer ? "选择正确。" : `再试一次。正确含义：${answer}`;
+      });
+    });
+  };
+
+  renderPractice();
   document.documentElement.appendChild(overlay);
+}
+
+function practicePrompt(mode: "shadowing" | "dictation" | "cloze" | "quiz") {
+  if (mode === "dictation") return "听原声，写下完整句子，然后检查匹配度。";
+  if (mode === "cloze") return "先根据上下文补全空格，再显示答案核对。";
+  if (mode === "quiz") return "选择与当前原句匹配的中文含义。";
+  return "播放当前句，跟读并尽量模仿节奏和重音。";
 }
 
 function mountOverlay() {
@@ -1015,9 +1390,16 @@ function setOverlayCue(cue?: LabCue) {
   }
   const translation = cue.translatedText?.trim();
   const settings = loadSafeSettings();
+  const showSource = settings.subtitleMode !== "translation" || !translation;
+  const showTranslation = Boolean(translation && settings.showTranslations && settings.subtitleMode !== "source");
+  const translationText = showTranslation && translation ? translation : "";
+  overlay.style.background = `rgba(0, 0, 0, ${settings.overlayBackgroundOpacity / 100})`;
+  overlay.style.setProperty("--yll-source-font", cssFontFamily(settings.sourceFontFamily));
+  overlay.style.setProperty("--yll-translation-font", cssFontFamily(settings.translationFontFamily));
+  overlay.style.setProperty("--yll-translation-size", `${settings.translationFontSize}px`);
   overlay.innerHTML = `
-    <span class="yll-overlay-source">${escapeHtml(cue.text)}</span>
-    ${translation && settings.showTranslations ? `<span class="yll-overlay-translation">${escapeHtml(translation)}</span>` : ""}
+    ${showSource ? `<span class="yll-overlay-source">${escapeHtml(cue.text)}</span>` : ""}
+    ${translationText ? `<span class="yll-overlay-translation">${escapeHtml(translationText)}</span>` : ""}
   `;
   overlay.classList.add("is-visible");
 }
@@ -1027,7 +1409,7 @@ function renderRows(rows: LabCue[]) {
   if (!list) return;
 
   const settings = loadSafeSettings();
-  list.classList.toggle("hide-translations", !settings.showTranslations);
+  list.classList.toggle("hide-translations", !settings.showTranslations || settings.subtitleMode === "source");
   const sorted = [...rows].sort((a, b) => b.startMs - a.startMs);
   list.innerHTML = sorted
     .map((cue) => {
@@ -1136,13 +1518,34 @@ function saveRows(rows: LabCue[], sourceLabel: string) {
     unique.set(key, existing && existing.text.length >= compactCue.text.length ? existing : compactCue);
   }
   const sortedUnique = Array.from(unique.values()).sort((a, b) => a.startMs - b.startMs);
-  runtime.__yllSafeRows = sortedUnique.filter((cue, index, all) => {
-    const previous = all[index - 1];
-    if (!previous) return true;
+  const cleanedRows: LabCue[] = [];
+  for (const cue of sortedUnique) {
+    const previous = cleanedRows[cleanedRows.length - 1];
+    if (!previous) {
+      cleanedRows.push(cue);
+      continue;
+    }
+
+    const nearby = Math.abs(cue.startMs - previous.startMs) < 3200;
     const sameText = normalizeForCompare(previous.text) === normalizeForCompare(cue.text);
-    const nearby = Math.abs(cue.startMs - previous.startMs) < 3000;
-    return !(sameText && nearby);
-  });
+    const highlySimilar = wordContainmentScore(previous.text, cue.text) >= 0.82;
+    if (nearby && (sameText || highlySimilar)) {
+      const preferred =
+        cue.text.length > previous.text.length ||
+        (cue.text.length === previous.text.length && cue.startMs > previous.startMs)
+          ? cue
+          : previous;
+      cleanedRows[cleanedRows.length - 1] = {
+        ...preferred,
+        startMs: Math.min(previous.startMs, cue.startMs),
+        durationMs: Math.max(previous.startMs + previous.durationMs, cue.startMs + cue.durationMs) - Math.min(previous.startMs, cue.startMs)
+      };
+      continue;
+    }
+
+    cleanedRows.push(cue);
+  }
+  runtime.__yllSafeRows = cleanedRows;
   if (runtime.__yllSafeRows.some((cue) => cue.source !== "visible")) {
     runtime.__yllSafeLoadedVideoId = getVideoId() || runtime.__yllSafeLoadedVideoId;
     runtime.__yllSafeCanUseVisibleFallback = false;
@@ -1476,9 +1879,10 @@ async function lookupWord(word: string, startMs?: string) {
   const cleaned = cleanText(word).slice(0, 48);
   if (!cleaned) return;
   showWordPopover(cleaned, "正在查询...");
+  const parsedStartMs = Number(startMs ?? "0");
   const videoId = getVideoId() || "current";
   const cue: LabCue = {
-    startMs: Number(startMs ?? "0"),
+    startMs: parsedStartMs,
     durationMs: 1200,
     text: cleaned,
     source: "official"
@@ -1486,7 +1890,11 @@ async function lookupWord(word: string, startMs?: string) {
   try {
     const translated = await translateCueBatch(videoId, [cue]);
     const translatedText = translated[0]?.translatedText;
-    showWordPopover(cleaned, translatedText || "暂时没有查到译文。");
+    showWordPopover(cleaned, translatedText || "暂时没有查到译文。", {
+      canSave: true,
+      startMs: parsedStartMs,
+      meaning: translatedText
+    });
   } catch (error) {
     showWordPopover(cleaned, `查词失败：${toErrorMessage(error)}`);
   }
@@ -2272,17 +2680,19 @@ async function loadRowsForCurrentVideo() {
   const hasOfficialRows = rows.some((cue) => cue.source !== "visible");
   if (runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRows) return;
   const now = Date.now();
-  if (!hasOfficialRows && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < OFFICIAL_RETRY_MS) {
+  const hasVisibleRows = rows.some((cue) => cue.source === "visible");
+  const retryWindowMs = (hasVisibleRows || runtime.__yllSafeCanUseVisibleFallback) ? OFFICIAL_FALLBACK_RETRY_MS : OFFICIAL_RETRY_MS;
+  if (!hasOfficialRows && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < retryWindowMs) {
     addDebugLog("load:cooldown", {
       rows: rows.length,
-      waitMs: OFFICIAL_RETRY_MS - (now - runtime.__yllSafeLastOfficialAttemptAt)
+      waitMs: retryWindowMs - (now - runtime.__yllSafeLastOfficialAttemptAt)
     });
     return;
   }
 
   runtime.__yllSafeLoadingVideoId = videoId;
   runtime.__yllSafeIsLoadingOfficial = true;
-  runtime.__yllSafeCanUseVisibleFallback = false;
+  runtime.__yllSafeCanUseVisibleFallback = hasVisibleRows || runtime.__yllSafeCanUseVisibleFallback;
   runtime.__yllSafeLastFailure = undefined;
   runtime.__yllSafeLastOfficialAttemptAt = now;
   runtime.__yllSafeOfficialAttemptCount = (runtime.__yllSafeOfficialAttemptCount ?? 0) + 1;
@@ -2293,7 +2703,7 @@ async function loadRowsForCurrentVideo() {
     runtime.__yllSafeActiveKey = undefined;
     renderRows([]);
   }
-  if (!rows.some((cue) => cue.source === "visible")) {
+  if (!hasVisibleRows) {
     document.documentElement.classList.remove("yll-hide-native-captions");
   }
   setStatus(`正在读取官方字幕轨道... 第 ${runtime.__yllSafeOfficialAttemptCount} 次`);
@@ -2365,6 +2775,7 @@ async function loadRowsForCurrentVideo() {
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeLoadingVideoId = undefined;
   runtime.__yllSafeCanUseVisibleFallback = true;
+  runtime.__yllSafeLastOfficialFailureAt = Date.now();
   ensureNativeCaptionsForFallback();
   const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
   addDebugLog("load:fallback-enabled", { debug });
@@ -2372,7 +2783,7 @@ async function loadRowsForCurrentVideo() {
 }
 
 function captureVisibleFallback() {
-  if (runtime.__yllSafeIsLoadingOfficial || !runtime.__yllSafeCanUseVisibleFallback) return;
+  if (!runtime.__yllSafeCanUseVisibleFallback) return;
   if ((runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible")) return;
   ensureNativeCaptionsForFallback();
   const cue = readVisibleCaptionCue(true);
@@ -2386,8 +2797,13 @@ function captureVisibleFallback() {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index];
     const normalizedRow = normalizeForCompare(row.text);
-    const nearby = Math.abs(row.startMs - cue.startMs) < 6000;
-    const overlap = normalizedRow && normalizedCue && (normalizedRow === normalizedCue || normalizedRow.includes(normalizedCue) || normalizedCue.includes(normalizedRow));
+    const nearby = Math.abs(row.startMs - cue.startMs) < 14000;
+    const overlap = normalizedRow && normalizedCue && (
+      normalizedRow === normalizedCue ||
+      normalizedRow.includes(normalizedCue) ||
+      normalizedCue.includes(normalizedRow) ||
+      wordContainmentScore(row.text, cue.text) >= 0.72
+    );
     if (nearby && overlap) {
       recentSimilarIndex = index;
       break;
@@ -2423,6 +2839,7 @@ function tick() {
       runtime.__yllSafeTranslatedVideoId = undefined;
       runtime.__yllSafeIsTranslating = false;
       runtime.__yllSafeLastOfficialAttemptAt = undefined;
+      runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
       runtime.__yllSafeLastOfficialDebug = undefined;
       document.getElementById(WORD_POPOVER_ID)?.remove();
@@ -2446,6 +2863,7 @@ function tick() {
       runtime.__yllSafeTranslatedVideoId = undefined;
       runtime.__yllSafeIsTranslating = false;
       runtime.__yllSafeLastOfficialAttemptAt = undefined;
+      runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
       runtime.__yllSafeLastOfficialDebug = undefined;
       document.getElementById(WORD_POPOVER_ID)?.remove();
@@ -2469,6 +2887,7 @@ function tick() {
 }
 
 function start() {
+  announceScriptVersion();
   runtime.__yllSafeDebugSnapshot = debugSnapshot;
   if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
   tick();

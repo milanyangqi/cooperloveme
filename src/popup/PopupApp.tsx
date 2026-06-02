@@ -25,6 +25,37 @@ export function PopupApp() {
 
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
+      func: () => {
+        const page = window as Window & {
+          __yllSafeTimer?: number;
+          __yllSafeStopCurrentScript?: () => void;
+          __yllSafeRows?: unknown[];
+          __yllSafeActiveKey?: string;
+          __yllSafeLoadedVideoId?: string;
+          __yllSafeLoadingVideoId?: string;
+        };
+        page.__yllSafeStopCurrentScript?.();
+        if (page.__yllSafeTimer) window.clearInterval(page.__yllSafeTimer);
+        page.__yllSafeTimer = undefined;
+        page.__yllSafeRows = [];
+        page.__yllSafeActiveKey = undefined;
+        page.__yllSafeLoadedVideoId = undefined;
+        page.__yllSafeLoadingVideoId = undefined;
+        [
+          "yll-lab-panel-v2",
+          "yll-lab-overlay-v2",
+          "yll-lab-word-popover-v2",
+          "yll-lab-settings-v2",
+          "yll-lab-practice-v2",
+          "yll-lab-library-v2",
+          "yll-lab-debug-v2",
+          "yll-lab-style-v2"
+        ].forEach((id) => document.getElementById(id)?.remove());
+        document.documentElement.classList.remove("yll-hide-native-captions");
+      }
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
       files: ["assets/content.js"]
     });
     await chrome.scripting.executeScript({
@@ -120,8 +151,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.66 待审核</strong>
-          <p>修复查词弹窗在收藏前被自动隐藏的问题。</p>
+          <strong>0.1.75 待审核</strong>
+          <p>修复扩展重载后旧脚本后台通信失效提示。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

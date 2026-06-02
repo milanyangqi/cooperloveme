@@ -120,8 +120,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.28 待审核</strong>
-          <p>fallback 强制关闭插件底部字幕，并按句子压缩重复文本。</p>
+          <strong>0.1.51 待审核</strong>
+          <p>修复中间字幕绑定主视频，并延长短句显示时间。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

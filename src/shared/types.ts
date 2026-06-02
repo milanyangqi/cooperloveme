@@ -354,6 +354,20 @@ export interface RuntimeRequestMap {
   CLEAR_LOCAL_DATA: undefined;
   READ_PAGE_PLAYER_RESPONSE: undefined;
   FETCH_CAPTION_TEXT: { url: string };
+  FETCH_CAPTION_TEXT_MAIN: { url: string };
+  INSTALL_TIMEDTEXT_BRIDGE: undefined;
+  FETCH_YOUTUBEI_PLAYER: {
+    videoId: string;
+    innertubeApiKey?: string;
+    innertubeClientVersion?: string;
+    visitorData?: string;
+  };
+  FETCH_YOUTUBEI_TRANSCRIPT: {
+    params: string;
+    innertubeApiKey?: string;
+    innertubeClientVersion?: string;
+    visitorData?: string;
+  };
 }
 
 export type RuntimeRequestType = keyof RuntimeRequestMap;

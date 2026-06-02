@@ -42,6 +42,38 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendRespo
 });
 
 async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
+  switch (message.type) {
+    case "READ_PAGE_PLAYER_RESPONSE":
+      if (!sender.tab?.id) {
+        throw new Error("只能从 YouTube 视频页面读取播放器字幕信息。");
+      }
+      return readLivePlayerSnapshot(sender.tab.id);
+
+    case "FETCH_CAPTION_TEXT":
+      return fetchCaptionText(message.payload.url);
+
+    case "FETCH_CAPTION_TEXT_MAIN":
+      if (!sender.tab?.id) {
+        throw new Error("只能从当前 YouTube 视频页面读取主世界字幕。");
+      }
+      return fetchCaptionTextInMainWorld(sender.tab.id, message.payload.url);
+
+    case "INSTALL_TIMEDTEXT_BRIDGE":
+      if (!sender.tab?.id) {
+        throw new Error("只能在当前 YouTube 视频页面安装字幕桥接。");
+      }
+      return installTimedTextBridge(sender.tab.id);
+
+    case "FETCH_YOUTUBEI_PLAYER":
+      return fetchYoutubeiPlayer(message.payload);
+
+    case "FETCH_YOUTUBEI_TRANSCRIPT":
+      return fetchYoutubeiTranscript(message.payload);
+
+    default:
+      break;
+  }
+
   const localUser = await ensureLocalUser();
 
   switch (message.type) {
@@ -207,18 +239,90 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       await clearAllStores();
       return { cleared: true };
 
-    case "READ_PAGE_PLAYER_RESPONSE":
-      if (!sender.tab?.id) {
-        throw new Error("只能从 YouTube 视频页面读取播放器字幕信息。");
-      }
-      return readLivePlayerSnapshot(sender.tab.id);
-
-    case "FETCH_CAPTION_TEXT":
-      return fetchCaptionText(message.payload.url);
-
     default:
       return assertNever(message);
   }
+}
+
+async function fetchYoutubeiPlayer(payload: {
+  videoId: string;
+  innertubeApiKey?: string;
+  innertubeClientVersion?: string;
+  visitorData?: string;
+}): Promise<unknown> {
+  const endpoint = new URL("https://www.youtube.com/youtubei/v1/player");
+  endpoint.searchParams.set("prettyPrint", "false");
+  if (payload.innertubeApiKey) endpoint.searchParams.set("key", payload.innertubeApiKey);
+
+  const response = await fetch(endpoint.toString(), {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "content-type": "application/json",
+      "origin": "https://www.youtube.com"
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: "WEB",
+          clientVersion: payload.innertubeClientVersion || "2.20240501.00.00",
+          visitorData: payload.visitorData || undefined
+        }
+      },
+      videoId: payload.videoId,
+      playbackContext: {
+        contentPlaybackContext: {
+          html5Preference: "HTML5_PREF_WANTS"
+        }
+      },
+      contentCheckOk: true,
+      racyCheckOk: true
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`youtubei player 请求失败：HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function fetchYoutubeiTranscript(payload: {
+  params: string;
+  innertubeApiKey?: string;
+  innertubeClientVersion?: string;
+  visitorData?: string;
+}): Promise<unknown> {
+  const endpoint = new URL("https://www.youtube.com/youtubei/v1/get_transcript");
+  endpoint.searchParams.set("prettyPrint", "false");
+  if (payload.innertubeApiKey) endpoint.searchParams.set("key", payload.innertubeApiKey);
+
+  const response = await fetch(endpoint.toString(), {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "content-type": "application/json",
+      "origin": "https://www.youtube.com"
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: "WEB",
+          clientVersion: payload.innertubeClientVersion || "2.20240501.00.00",
+          visitorData: payload.visitorData || undefined
+        }
+      },
+      params: payload.params
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`youtubei transcript 请求失败：HTTP ${response.status}`);
+  }
+
+  return response.json();
 }
 
 async function fetchCaptionText(url: string): Promise<{ body: string; finalUrl: string; status: number }> {
@@ -247,6 +351,122 @@ async function fetchCaptionText(url: string): Promise<{ body: string; finalUrl: 
     finalUrl: response.url,
     status: response.status
   };
+}
+
+async function fetchCaptionTextInMainWorld(tabId: number, url: string): Promise<{ body: string; finalUrl: string; status: number; contentType: string }> {
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    args: [url],
+    func: async (captionUrl: string) => {
+      const parsed = new URL(captionUrl, location.href);
+      const allowed =
+        parsed.protocol === "https:" &&
+        (parsed.hostname === "youtube.com" ||
+          parsed.hostname.endsWith(".youtube.com") ||
+          parsed.hostname.endsWith(".googlevideo.com"));
+
+      if (!allowed) {
+        throw new Error("字幕地址不在允许读取的 YouTube 域名范围内。");
+      }
+
+      const response = await fetch(parsed.toString(), {
+        credentials: "include",
+        cache: "no-store",
+        redirect: "follow",
+        referrer: location.href,
+        referrerPolicy: "strict-origin-when-cross-origin"
+      });
+
+      return {
+        body: await response.text(),
+        finalUrl: response.url,
+        status: response.status,
+        contentType: response.headers.get("content-type") ?? ""
+      };
+    }
+  });
+
+  return injection?.result ?? { body: "", finalUrl: url, status: 0, contentType: "" };
+}
+
+async function installTimedTextBridge(tabId: number): Promise<{ installed: boolean }> {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => {
+      const win = window as unknown as {
+        __yllTimedTextBridgeInstalled?: boolean;
+        fetch: typeof window.fetch;
+        XMLHttpRequest: typeof window.XMLHttpRequest;
+      };
+      if (win.__yllTimedTextBridgeInstalled) return;
+      win.__yllTimedTextBridgeInstalled = true;
+
+      const emit = (url: string, body: string, status: number, contentType = "") => {
+        try {
+          const parsed = new URL(url, location.href);
+          if (!parsed.pathname.includes("/api/timedtext")) return;
+          window.postMessage({
+            source: "yll-timedtext-bridge",
+            type: "timedtext-body",
+            url: parsed.toString(),
+            body,
+            status,
+            contentType,
+            capturedAt: Date.now()
+          }, "*");
+        } catch {
+          // Ignore malformed URLs.
+        }
+      };
+
+      const originalFetch = win.fetch.bind(window);
+      win.fetch = async (...args: Parameters<typeof fetch>) => {
+        const response = await originalFetch(...args);
+        try {
+          const request = args[0];
+          const url = typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url;
+          if (url.includes("/api/timedtext")) {
+            const clone = response.clone();
+            void clone.text().then((body) => emit(url, body, clone.status, clone.headers.get("content-type") ?? "")).catch(() => undefined);
+          }
+        } catch {
+          // Preserve page fetch behavior.
+        }
+        return response;
+      };
+
+      const OriginalXHR = win.XMLHttpRequest;
+      const xhrPrototype = OriginalXHR.prototype as XMLHttpRequest & {
+        open: (...args: unknown[]) => void;
+        send: (...args: unknown[]) => void;
+      };
+      const originalOpen = xhrPrototype.open;
+      const originalSend = xhrPrototype.send;
+      xhrPrototype.open = function open(...args: unknown[]) {
+        const [, url] = args;
+        (this as XMLHttpRequest & { __yllTimedTextUrl?: string }).__yllTimedTextUrl = String(url);
+        return originalOpen.apply(this, args);
+      };
+      xhrPrototype.send = function send(...args: unknown[]) {
+        const xhr = this as XMLHttpRequest & { __yllTimedTextUrl?: string };
+        if (xhr.__yllTimedTextUrl?.includes("/api/timedtext")) {
+          this.addEventListener("load", () => {
+            try {
+              const body = typeof xhr.responseText === "string" ? xhr.responseText : "";
+              emit(xhr.__yllTimedTextUrl ?? "", body, xhr.status, xhr.getResponseHeader("content-type") ?? "");
+            } catch {
+              // Ignore response access errors.
+            }
+          });
+        }
+        return originalSend.apply(this, args);
+      };
+    }
+  });
+
+  return { installed: true };
 }
 
 async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
@@ -316,9 +536,42 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
         visit(value, 0);
         return found;
       };
+      const extractTranscriptParams = (value: unknown, maxDepth = 8): string[] => {
+        const seen = new WeakSet<object>();
+        const found = new Set<string>();
+
+        const visit = (current: unknown, depth: number) => {
+          if (depth > maxDepth || !current || typeof current !== "object") return;
+          const objectValue = current as Record<string, unknown>;
+          if (seen.has(objectValue)) return;
+          seen.add(objectValue);
+
+          const endpoint = objectValue.getTranscriptEndpoint;
+          if (endpoint && typeof endpoint === "object") {
+            const params = (endpoint as Record<string, unknown>).params;
+            if (typeof params === "string" && params) found.add(params);
+          }
+
+          if (Array.isArray(current)) {
+            current.slice(0, 120).forEach((item) => visit(item, depth + 1));
+            return;
+          }
+
+          Object.entries(objectValue).forEach(([key, child]) => {
+            if (key.toLowerCase().includes("transcript") || key === "engagementPanels" || depth < 3) {
+              visit(child, depth + 1);
+            }
+          });
+        };
+
+        visit(value, 0);
+        return Array.from(found);
+      };
 
       const win = window as unknown as {
         ytInitialPlayerResponse?: unknown;
+        ytInitialData?: unknown;
+        ytcfg?: { get?: (key: string) => unknown };
         ytplayer?: { config?: { args?: { raw_player_response?: unknown; player_response?: unknown } } };
       };
       const player = document.getElementById("movie_player") as
@@ -350,12 +603,21 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
           return (candidate.baseUrl ?? candidate.base_url ?? candidate.url) === currentUrl;
         }) === index;
       });
+      const playerCaptionTracks = Array.isArray(tracklist) ? tracklist.filter(looksLikeCaptionTrack) : extractCaptionTracks(tracklist);
 
       return JSON.parse(
         JSON.stringify({
           playerResponse,
           videoData,
           captionTracks,
+          playerCaptionTracks,
+          transcriptParams: [
+            ...extractTranscriptParams(win.ytInitialData),
+            ...extractTranscriptParams(playerResponse)
+          ].filter((params, index, all) => all.indexOf(params) === index),
+          innertubeApiKey: safe(() => win.ytcfg?.get?.("INNERTUBE_API_KEY")),
+          innertubeClientVersion: safe(() => win.ytcfg?.get?.("INNERTUBE_CLIENT_VERSION")),
+          visitorData: safe(() => win.ytcfg?.get?.("VISITOR_DATA")),
           href: location.href
         })
       );

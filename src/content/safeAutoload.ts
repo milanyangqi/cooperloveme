@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.82";
+const SCRIPT_VERSION = "0.1.89";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -138,8 +138,8 @@ const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 12000;
-const OFFICIAL_AUTO_ATTEMPTS = 3;
-const OFFICIAL_ATTEMPT_TIMEOUT_MS = 9000;
+const OFFICIAL_AUTO_ATTEMPTS = 1;
+const OFFICIAL_ATTEMPT_TIMEOUT_MS = 4000;
 const USER_SCROLL_PAUSE_MS = 4200;
 
 type SafeSettings = {
@@ -177,11 +177,15 @@ const DEFAULT_SETTINGS: SafeSettings = {
 const runtime = window as typeof window & {
   __yllSafeTimer?: number;
   __yllSafeOverlayTimer?: number;
+  __yllSafeOfficialRetryTimer?: number;
   __yllSafeLastHref?: string;
+  __yllSafeLastVideoId?: string;
   __yllSafeRows?: LabCue[];
+  __yllSafeRowsGeneration?: number;
   __yllSafeActiveKey?: string;
   __yllSafeLoadedVideoId?: string;
   __yllSafeLoadingVideoId?: string;
+  __yllSafeOfficialLockedVideoId?: string;
   __yllSafeTranslationToken?: number;
   __yllSafeTranslatedVideoId?: string;
   __yllSafeIsTranslating?: boolean;
@@ -241,7 +245,10 @@ function stopCurrentScriptInstance() {
   runtime.__yllSafeTimer = undefined;
   if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
   runtime.__yllSafeOverlayTimer = undefined;
+  if (runtime.__yllSafeOfficialRetryTimer) window.clearTimeout(runtime.__yllSafeOfficialRetryTimer);
+  runtime.__yllSafeOfficialRetryTimer = undefined;
   runtime.__yllSafeLoadingVideoId = undefined;
+  runtime.__yllSafeOfficialLockedVideoId = undefined;
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeCanUseVisibleFallback = false;
   document.getElementById(PANEL_ID)?.remove();
@@ -388,6 +395,7 @@ function saveSafeSettings(settings: SafeSettings) {
   runtime.__yllSafeSettings = settings;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   applySafeSettings();
+  updateModeSelect();
   renderSettingsPanel();
   renderRows(runtime.__yllSafeRows ?? []);
   updateActiveCue();
@@ -395,8 +403,13 @@ function saveSafeSettings(settings: SafeSettings) {
 
 function applySafeSettings() {
   const settings = loadSafeSettings();
-  const hasOfficialRows = (runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible");
-  document.documentElement.classList.toggle("yll-hide-native-captions", settings.hideNativeCaptions && hasOfficialRows);
+  const hasPluginRows = (runtime.__yllSafeRows ?? []).length > 0;
+  document.documentElement.classList.toggle("yll-hide-native-captions", settings.hideNativeCaptions && hasPluginRows);
+}
+
+function updateModeSelect() {
+  const select = document.querySelector<HTMLSelectElement>(`#${PANEL_ID} [data-yll-mode-select]`);
+  if (select) select.value = loadSafeSettings().subtitleMode;
 }
 
 function renderClickableText(text: string) {
@@ -699,6 +712,22 @@ function installStyle() {
       gap: 10px;
     }
     #${PANEL_ID} .yll-title { font-weight: 750; font-size: 14px; }
+    #${PANEL_ID} .yll-title-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #${PANEL_ID} .yll-mode-select {
+      height: 28px;
+      max-width: 112px;
+      color: #f7f8f8;
+      background: #2b2e32;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
     #${PANEL_ID} .yll-close {
       height: 28px;
       padding: 0 10px;
@@ -962,7 +991,23 @@ function installStyle() {
       overflow: auto;
       white-space: pre-wrap;
     }
-    #${DEBUG_PANEL_ID} strong { display: block; margin-bottom: 8px; color: #ffc857; font: 700 13px/1.2 system-ui, sans-serif; }
+    #${DEBUG_PANEL_ID} .yll-debug-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    #${DEBUG_PANEL_ID} strong { color: #ffc857; font: 700 13px/1.2 system-ui, sans-serif; }
+    #${DEBUG_PANEL_ID} .yll-debug-copy {
+      padding: 5px 8px;
+      color: #f7f8f8;
+      background: #2d3034;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 6px;
+      font: 700 12px/1 system-ui, sans-serif;
+      cursor: pointer;
+    }
     #${PRACTICE_ID} {
       position: fixed;
       inset: 0;
@@ -1185,7 +1230,14 @@ function mountPanel() {
     <div class="yll-head">
       <div class="yll-title-row">
         <div class="yll-title">YouTube Language Lab</div>
-        <button class="yll-close" type="button">关闭</button>
+        <div class="yll-title-actions">
+          <select class="yll-mode-select" aria-label="字幕模式" data-yll-mode-select>
+            <option value="dual">双语字幕</option>
+            <option value="source">原文字幕</option>
+            <option value="translation">译文字幕</option>
+          </select>
+          <button class="yll-close" type="button">关闭</button>
+        </div>
       </div>
       <div class="yll-toolbar">
         <button class="yll-tool" type="button" data-yll-action="practice">练习当前句</button>
@@ -1211,6 +1263,13 @@ function mountPanel() {
     runtime.__yllSafeOverlayTimer = undefined;
     runtime.__yllSafeTranslationToken = undefined;
   });
+  panel.querySelector<HTMLSelectElement>("[data-yll-mode-select]")?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    const settings = loadSafeSettings();
+    const subtitleMode = parseSubtitleMode(select.value);
+    saveSafeSettings({ ...settings, subtitleMode });
+    addDebugLog("subtitle-mode-change", { subtitleMode, version: SCRIPT_VERSION });
+  });
   panel.querySelector<HTMLButtonElement>('[data-yll-action="settings"]')?.addEventListener("click", () => {
     toggleSettingsPanel();
   });
@@ -1226,6 +1285,7 @@ function mountPanel() {
   document.documentElement.appendChild(panel);
   bindCaptionListScrollState(panel.querySelector<HTMLElement>(`#${LIST_ID}`));
   applySafeSettings();
+  updateModeSelect();
   return panel;
 }
 
@@ -1566,7 +1626,34 @@ function renderDebugPanel() {
   const panel = document.getElementById(DEBUG_PANEL_ID);
   if (!panel) return;
   const snapshot = debugSnapshot();
-  panel.innerHTML = `<strong>字幕诊断日志</strong>${escapeHtml(JSON.stringify(snapshot, null, 2))}`;
+  const text = JSON.stringify(snapshot, null, 2);
+  panel.innerHTML = `
+    <div class="yll-debug-head">
+      <strong>字幕诊断日志</strong>
+      <button class="yll-debug-copy" type="button" data-copy-debug>复制日志</button>
+    </div>
+    <code>${escapeHtml(text)}</code>
+  `;
+  panel.querySelector<HTMLButtonElement>("[data-copy-debug]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "已复制";
+    } catch {
+      const range = document.createRange();
+      const code = panel.querySelector("code");
+      if (code) {
+        range.selectNodeContents(code);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      button.textContent = "已选中";
+    }
+    window.setTimeout(() => {
+      button.textContent = "复制日志";
+    }, 1400);
+  });
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
@@ -2316,7 +2403,42 @@ function refreshOverlayHighlight() {
   setOverlayCue(active);
 }
 
+function hasOfficialRows(rows = runtime.__yllSafeRows ?? []) {
+  return rows.some((cue) => cue.source !== "visible");
+}
+
+function clearScheduledOfficialRetry() {
+  if (runtime.__yllSafeOfficialRetryTimer) window.clearTimeout(runtime.__yllSafeOfficialRetryTimer);
+  runtime.__yllSafeOfficialRetryTimer = undefined;
+}
+
+function lockOfficialRowsForCurrentVideo(videoId = getVideoId()) {
+  if (!videoId) return;
+  runtime.__yllSafeLoadedVideoId = videoId;
+  runtime.__yllSafeOfficialLockedVideoId = videoId;
+  runtime.__yllSafeCanUseVisibleFallback = false;
+  clearScheduledOfficialRetry();
+}
+
+function scheduleOfficialRetry(delayMs: number, reason: string) {
+  const videoId = getVideoId();
+  if (!videoId || hasOfficialRows()) return;
+  clearScheduledOfficialRetry();
+  runtime.__yllSafeOfficialRetryTimer = window.setTimeout(() => {
+    runtime.__yllSafeOfficialRetryTimer = undefined;
+    addDebugLog("load:scheduled-retry-run", { reason, videoId });
+    void loadRowsForCurrentVideo({ force: true, reason }).catch((error) => {
+      runtime.__yllSafeIsLoadingOfficial = false;
+      runtime.__yllSafeLoadingVideoId = undefined;
+      runtime.__yllSafeLastFailure = `scheduled retry: ${toErrorMessage(error)}`;
+      addDebugLog("load:scheduled-retry-error", { reason, error: toErrorMessage(error) });
+    });
+  }, delayMs);
+  addDebugLog("load:scheduled-retry", { delayMs, reason, videoId });
+}
+
 function saveRows(rows: LabCue[], sourceLabel: string) {
+  const currentVideoId = getVideoId();
   const unique = new Map<string, LabCue>();
   const existingTranslations = new Map(
     (runtime.__yllSafeRows ?? [])
@@ -2362,14 +2484,36 @@ function saveRows(rows: LabCue[], sourceLabel: string) {
     }
 
     cleanedRows.push(cue);
+	  }
+  const existingRows = runtime.__yllSafeRows ?? [];
+  const incomingHasOfficialRows = cleanedRows.some((cue) => cue.source !== "visible");
+  if (!incomingHasOfficialRows && hasOfficialRows(existingRows) && runtime.__yllSafeOfficialLockedVideoId === currentVideoId) {
+    addDebugLog("rows:ignore-visible-after-official", {
+      sourceLabel,
+      inputRows: rows.length,
+      existingRows: existingRows.length,
+      lockedVideoId: runtime.__yllSafeOfficialLockedVideoId
+    });
+    return;
   }
+  if (incomingHasOfficialRows) {
+    runtime.__yllSafeTranslationToken = undefined;
+    runtime.__yllSafeTranslatedVideoId = undefined;
+    runtime.__yllSafeIsTranslating = false;
+  }
+  runtime.__yllSafeRowsGeneration = (runtime.__yllSafeRowsGeneration ?? 0) + 1;
   runtime.__yllSafeRows = cleanedRows;
-  if (runtime.__yllSafeRows.some((cue) => cue.source !== "visible")) {
-    runtime.__yllSafeLoadedVideoId = getVideoId() || runtime.__yllSafeLoadedVideoId;
-    runtime.__yllSafeCanUseVisibleFallback = false;
-  }
+  if (runtime.__yllSafeRows.some((cue) => cue.source !== "visible")) lockOfficialRowsForCurrentVideo();
   applySafeSettings();
   renderRows(runtime.__yllSafeRows);
+  addDebugLog("rows:saved", {
+    sourceLabel,
+    inputRows: rows.length,
+    cleanedRows: runtime.__yllSafeRows.length,
+    sources: Array.from(new Set(runtime.__yllSafeRows.map((cue) => cue.source))),
+    translatedRows: runtime.__yllSafeRows.filter((cue) => cue.translatedText).length,
+    hideNativeCaptions: document.documentElement.classList.contains("yll-hide-native-captions")
+  });
   setStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕，来源：${sourceLabel}。`);
   updateActiveCue();
   void translateRowsForCurrentVideo(sourceLabel);
@@ -2655,6 +2799,7 @@ async function translateCueBatch(videoId: string, cues: LabCue[]) {
 async function translateRowsForCurrentVideo(sourceLabel: string) {
   const videoId = getVideoId();
   const rows = runtime.__yllSafeRows ?? [];
+  const rowsGeneration = runtime.__yllSafeRowsGeneration ?? 0;
   if (!videoId || !rows.length) return;
   if (runtime.__yllSafeIsTranslating) return;
   if (runtime.__yllSafeTranslatedVideoId === videoId && rows.every((row) => row.translatedText)) return;
@@ -2677,6 +2822,15 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
       const batch = translatable.slice(index, index + TRANSLATION_BATCH_SIZE);
       try {
         const translated = await translateCueBatch(videoId, batch);
+        if (runtime.__yllSafeTranslationToken !== token || getVideoId() !== videoId || (runtime.__yllSafeRowsGeneration ?? 0) !== rowsGeneration) {
+          addDebugLog("translation:stale-abort", {
+            sourceLabel,
+            batchStart: index,
+            rowsGeneration,
+            currentRowsGeneration: runtime.__yllSafeRowsGeneration ?? 0
+          });
+          return;
+        }
         translated.forEach((item, itemIndex) => {
           const sourceCue = batch[itemIndex];
           if (!sourceCue) return;
@@ -2705,8 +2859,27 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     if (runtime.__yllSafeTranslationToken === token && getVideoId() === videoId) {
-      setStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕，来源：${sourceLabel}；中文译文已生成。`);
+      const translatedRows = runtime.__yllSafeRows?.filter((cue) => cue.translatedText).length ?? 0;
+      addDebugLog("translation:complete", {
+        sourceLabel,
+        rows: runtime.__yllSafeRows?.length ?? rows.length,
+        translatedRows
+      });
+      if (translatedRows > 0) {
+        setStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕，来源：${sourceLabel}；中文译文已生成。`);
+      } else {
+        runtime.__yllSafeTranslatedVideoId = undefined;
+        setStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕，来源：${sourceLabel}；中文译文暂未生成，稍后会重试。`);
+        window.setTimeout(() => {
+          if (getVideoId() === videoId && !(runtime.__yllSafeRows ?? []).some((cue) => cue.translatedText)) {
+            void translateRowsForCurrentVideo(sourceLabel);
+          }
+        }, 1800);
+      }
     }
+  } catch (error) {
+    addDebugLog("translation:error", { sourceLabel, error: toErrorMessage(error) });
+    setStatus(`已加载 ${rows.length} 条字幕；翻译流程异常：${toErrorMessage(error)}`);
   } finally {
     if (runtime.__yllSafeTranslationToken === token) runtime.__yllSafeIsTranslating = false;
   }
@@ -3542,16 +3715,17 @@ function ensureNativeCaptionsForFallback() {
   document.documentElement.classList.add("yll-hide-native-captions");
 }
 
-async function loadRowsForCurrentVideo() {
+async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: string } = {}) {
   const videoId = getVideoId();
   if (!videoId || runtime.__yllSafeLoadingVideoId === videoId) return;
   const rows = runtime.__yllSafeRows ?? [];
-  const hasOfficialRows = rows.some((cue) => cue.source !== "visible");
-  if (runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRows) return;
+  const hasOfficialRowsForVideo = hasOfficialRows(rows);
+  if (!options.force && runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRowsForVideo) return;
+  if (!options.force && runtime.__yllSafeOfficialLockedVideoId === videoId && hasOfficialRowsForVideo) return;
   const now = Date.now();
   const hasVisibleRows = rows.some((cue) => cue.source === "visible");
   const retryWindowMs = (hasVisibleRows || runtime.__yllSafeCanUseVisibleFallback) ? OFFICIAL_FALLBACK_RETRY_MS : OFFICIAL_RETRY_MS;
-  if (!hasOfficialRows && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < retryWindowMs) {
+  if (!options.force && !hasOfficialRowsForVideo && runtime.__yllSafeLastOfficialAttemptAt && now - runtime.__yllSafeLastOfficialAttemptAt < retryWindowMs) {
     addDebugLog("load:cooldown", {
       rows: rows.length,
       waitMs: retryWindowMs - (now - runtime.__yllSafeLastOfficialAttemptAt)
@@ -3566,8 +3740,15 @@ async function loadRowsForCurrentVideo() {
   runtime.__yllSafeLastOfficialAttemptAt = now;
   runtime.__yllSafeOfficialAttemptCount = (runtime.__yllSafeOfficialAttemptCount ?? 0) + 1;
   runtime.__yllSafeLastOfficialDebug = [];
-  addDebugLog("load:start", { videoId, pass: runtime.__yllSafeOfficialAttemptCount, existingRows: rows.length, hasOfficialRows });
-  if (!rows.length || hasOfficialRows) {
+  addDebugLog("load:start", {
+    videoId,
+    pass: runtime.__yllSafeOfficialAttemptCount,
+    existingRows: rows.length,
+    hasOfficialRows: hasOfficialRowsForVideo,
+    force: Boolean(options.force),
+    reason: options.reason ?? "poll"
+  });
+  if (!rows.length || (options.force && hasOfficialRowsForVideo)) {
     runtime.__yllSafeRows = [];
     runtime.__yllSafeActiveKey = undefined;
     renderRows([]);
@@ -3584,7 +3765,7 @@ async function loadRowsForCurrentVideo() {
   for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
     setStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`);
     try {
-      const includeSlowPaths = attempt === OFFICIAL_AUTO_ATTEMPTS - 1;
+      const includeSlowPaths = Boolean(hasVisibleRows && runtime.__yllSafeOfficialAttemptCount % 4 === 0);
       addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS, includeSlowPaths });
       const officialRows = await withTimeout(
         loadOfficialRows(videoId, { includeSlowPaths }),
@@ -3600,7 +3781,7 @@ async function loadRowsForCurrentVideo() {
         saveRows(officialRows, sourceLabel);
         runtime.__yllSafeIsLoadingOfficial = false;
         runtime.__yllSafeLoadingVideoId = undefined;
-        runtime.__yllSafeLoadedVideoId = videoId;
+        lockOfficialRowsForCurrentVideo(videoId);
         runtime.__yllSafeLastOfficialDebug = [`success:${sourceLabel}:${officialRows.length}`];
         addDebugLog("load:official-success", { sourceLabel, rows: officialRows.length });
         return;
@@ -3617,7 +3798,7 @@ async function loadRowsForCurrentVideo() {
         saveRows(textTrackRows, "video.textTracks");
         runtime.__yllSafeIsLoadingOfficial = false;
         runtime.__yllSafeLoadingVideoId = undefined;
-        runtime.__yllSafeLoadedVideoId = videoId;
+        lockOfficialRowsForCurrentVideo(videoId);
         runtime.__yllSafeLastOfficialDebug = [`success:video.textTracks:${textTrackRows.length}`];
         addDebugLog("load:text-track-success", { rows: textTrackRows.length });
         return;
@@ -3633,7 +3814,7 @@ async function loadRowsForCurrentVideo() {
         saveRows(directRows, "YouTube timedtext");
         runtime.__yllSafeIsLoadingOfficial = false;
         runtime.__yllSafeLoadingVideoId = undefined;
-        runtime.__yllSafeLoadedVideoId = videoId;
+        lockOfficialRowsForCurrentVideo(videoId);
         runtime.__yllSafeLastOfficialDebug = [`success:directTimedText:${directRows.length}`];
         addDebugLog("load:direct-timedtext-success", { rows: directRows.length });
         return;
@@ -3654,11 +3835,13 @@ async function loadRowsForCurrentVideo() {
   const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
   addDebugLog("load:fallback-enabled", { debug });
   setStatus(`官方字幕暂未读到，${Math.round(OFFICIAL_FALLBACK_RETRY_MS / 1000)} 秒后自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`);
+  scheduleOfficialRetry(3000, "fallback-enabled");
 }
 
 function captureVisibleFallback() {
   if (!runtime.__yllSafeCanUseVisibleFallback) return;
-  if ((runtime.__yllSafeRows ?? []).some((cue) => cue.source !== "visible")) return;
+  if (runtime.__yllSafeOfficialLockedVideoId === getVideoId()) return;
+  if (hasOfficialRows()) return;
   ensureNativeCaptionsForFallback();
   const cue = readVisibleCaptionCue(true);
   if (!cue) return;
@@ -3701,14 +3884,18 @@ function captureVisibleFallback() {
 function tick() {
   try {
     if (!isWatchPage()) {
+      clearScheduledOfficialRetry();
       document.getElementById(PANEL_ID)?.remove();
       document.getElementById(OVERLAY_ID)?.remove();
       document.documentElement.classList.remove("yll-hide-native-captions");
+      runtime.__yllSafeLastVideoId = undefined;
       runtime.__yllSafeLoadedVideoId = undefined;
       runtime.__yllSafeLoadingVideoId = undefined;
+      runtime.__yllSafeOfficialLockedVideoId = undefined;
       runtime.__yllSafeIsLoadingOfficial = false;
       runtime.__yllSafeCanUseVisibleFallback = false;
       runtime.__yllSafeRows = [];
+      runtime.__yllSafeRowsGeneration = undefined;
       runtime.__yllSafeTranslationToken = undefined;
       runtime.__yllSafeTranslatedVideoId = undefined;
       runtime.__yllSafeIsTranslating = false;
@@ -3716,6 +3903,7 @@ function tick() {
       runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
       runtime.__yllSafeLastOfficialDebug = undefined;
+      runtime.__yllSafeRowsGeneration = undefined;
       document.getElementById(WORD_POPOVER_ID)?.remove();
     document.getElementById(SETTINGS_PANEL_ID)?.remove();
     document.getElementById(DEBUG_PANEL_ID)?.remove();
@@ -3726,10 +3914,14 @@ function tick() {
     mountPanel();
     mountOverlay();
     positionOverlay();
-    if (runtime.__yllSafeLastHref !== location.href) {
+    const currentVideoId = getVideoId();
+    if (runtime.__yllSafeLastVideoId !== currentVideoId) {
+      clearScheduledOfficialRetry();
       runtime.__yllSafeLastHref = location.href;
+      runtime.__yllSafeLastVideoId = currentVideoId;
       runtime.__yllSafeLoadedVideoId = undefined;
       runtime.__yllSafeLoadingVideoId = undefined;
+      runtime.__yllSafeOfficialLockedVideoId = undefined;
       runtime.__yllSafeIsLoadingOfficial = false;
       runtime.__yllSafeCanUseVisibleFallback = false;
       runtime.__yllTimedTextBridgeInstalled = false;
@@ -3784,11 +3976,14 @@ window.addEventListener("yll-open-practice", () => {
 window.addEventListener("yll-safe-reload", () => {
   if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
   runtime.__yllSafeOverlayTimer = undefined;
+  clearScheduledOfficialRetry();
   runtime.__yllSafeLoadedVideoId = undefined;
   runtime.__yllSafeLoadingVideoId = undefined;
+  runtime.__yllSafeOfficialLockedVideoId = undefined;
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeCanUseVisibleFallback = false;
   runtime.__yllSafeRows = [];
+  runtime.__yllSafeRowsGeneration = undefined;
   runtime.__yllSafeActiveKey = undefined;
   runtime.__yllSafeTranslationToken = undefined;
   runtime.__yllSafeTranslatedVideoId = undefined;

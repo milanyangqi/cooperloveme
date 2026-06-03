@@ -29,21 +29,26 @@ export function PopupApp() {
         const page = window as Window & {
           __yllSafeTimer?: number;
           __yllSafeOverlayTimer?: number;
+          __yllSafeOfficialRetryTimer?: number;
           __yllSafeStopCurrentScript?: () => void;
           __yllSafeRows?: unknown[];
           __yllSafeActiveKey?: string;
           __yllSafeLoadedVideoId?: string;
           __yllSafeLoadingVideoId?: string;
+          __yllSafeOfficialLockedVideoId?: string;
         };
         page.__yllSafeStopCurrentScript?.();
         if (page.__yllSafeTimer) window.clearInterval(page.__yllSafeTimer);
         page.__yllSafeTimer = undefined;
         if (page.__yllSafeOverlayTimer) window.clearInterval(page.__yllSafeOverlayTimer);
         page.__yllSafeOverlayTimer = undefined;
+        if (page.__yllSafeOfficialRetryTimer) window.clearTimeout(page.__yllSafeOfficialRetryTimer);
+        page.__yllSafeOfficialRetryTimer = undefined;
         page.__yllSafeRows = [];
         page.__yllSafeActiveKey = undefined;
         page.__yllSafeLoadedVideoId = undefined;
         page.__yllSafeLoadingVideoId = undefined;
+        page.__yllSafeOfficialLockedVideoId = undefined;
         [
           "yll-lab-panel-v2",
           "yll-lab-overlay-v2",
@@ -171,8 +176,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.82 待审核</strong>
-          <p>修复右侧字幕当前句自动定位，避免卡在底部。</p>
+          <strong>0.1.89 待审核</strong>
+          <p>修复官方字幕替换时旧翻译任务覆盖新字幕的问题。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-03 13:47:00 CST
+Last updated: 2026-06-03 18:28:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,16 +18,16 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-03 08:45 CST | `0.1.78` increases automatic official-track retries, waits longer, and enables slow paths on the last automatic attempt | Must remain the primary path. Diagnostic logs stay available for future failures. |
+| Official YouTube caption loading | In Review | 2026-06-03 16:29 CST | `0.1.88` adds delayed forced official retry, locks successful official rows per video, and resets only on video ID changes | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
-| Native YouTube CC hiding | Done | 2026-06-02 | Runtime check showed native visible count 0 | Keep default enabled to avoid duplicate subtitle overlays. |
+| Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
 | Right-side newest-on-top / upward scroll behavior | Done | 2026-06-03 13:47 CST | `0.1.82` Chrome QA showed the active row visible around the middle of the panel after official subtitles loaded | Keep monitoring on long videos and fallback videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
 | Bilingual overlay on video | In Review | 2026-06-03 09:25 CST | `0.1.79` preserves json3 segment offsets for word highlighting, adds weighted fallback timing, and exposes word-only calibration | Needs Chrome visual timing review. |
-| Free translation fallback | Done | 2026-06-02 | Runtime test generated 289 translated rows | Uses free translation path before paid AI configuration. |
+| Free translation fallback | In Review | 2026-06-03 18:28 CST | `0.1.89` cancels stale fallback translation tasks when official rows replace the list and prevents 0 translated rows from being marked successful | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | Partial | 2026-06-02 | Word spans and popover implemented | Needs broader UX review and vocabulary save flow. |
-| Subtitle settings panel | In Review | 2026-06-02 21:44 CST | `0.1.74` adds sync calibration and word-highlight toggle to existing style controls | Needs manual Chrome review; advanced highlight-style editor still planned. |
+| Subtitle settings panel | In Review | 2026-06-03 14:10 CST | `0.1.83` adds a right-panel subtitle-mode selector and logs mode changes for diagnostics | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-03 09:51 CST | `0.1.80` restores the popup full-practice entry and lets saved sentences open the mixed-practice overlay | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
@@ -39,12 +39,61 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
-| Caption diagnostics panel | In Review | 2026-06-02 15:01 CST | `0.1.61` docks diagnostics inside the subtitle panel | Keeps debug logs available without covering video/recommendations. |
+| Caption diagnostics panel | In Review | 2026-06-03 14:16 CST | `0.1.86` records final row/translation summaries and adds one-click diagnostic log copy | Keep debug UI available during recovery; hide from production later. |
 | Stale content-script protection | In Review | 2026-06-02 21:57 CST | `0.1.75` handles `Extension context invalidated` and points users to popup wake-up | Needs extension reload and Chrome review to confirm stale panels stop misleading QA. |
 
 ## Timeline
 
 ### 2026-06-03
+
+- Local `0.1.89` translation race recovery:
+  - Chrome diagnostics on `0.1.88` showed fallback translation completed after official captions replaced the row list
+  - the stale fallback task mapped 1 old row against 107 new official rows, wrote 0 translations, and still displayed `中文译文已生成`
+  - added a row-generation guard so stale translation batches abort when the subtitle list changes
+  - official row saves now cancel any old translation token and allow the official row list to start a fresh translation pass
+  - translation status now only says `中文译文已生成` when at least one row actually has translated text; otherwise it schedules a retry
+  - pending extension reload and Chrome review
+
+- Local `0.1.88` official-caption persistence recovery:
+  - user reported official captions only load after clicking `重读字幕`, and the successful result does not stay long
+  - added a scheduled forced official retry after fallback starts, so early page-load timing failures retry automatically without manual action
+  - locks successful official caption rows for the current video and prevents visible-CC fallback rows from replacing them
+  - changed navigation reset logic to use YouTube `videoId` instead of full `location.href`, avoiding subtitle resets caused by harmless URL or SPA state changes
+  - popup wake cleanup now clears the official retry timer and official lock state to avoid stale-page timer conflicts
+  - pending extension reload and Chrome review
+
+- Local `0.1.87` first-screen subtitle speed recovery:
+  - Chrome QA on `0.1.86` showed official auto attempts timing out twice at 9000ms before fallback took over
+  - reduced initial official auto attempts from 3 to 1 and timeout from 9000ms to 4000ms
+  - fallback can now display rows much sooner while official captions continue retrying every fallback interval
+  - slow official paths now run only on every fourth background retry after fallback already has visible rows
+  - pending extension reload and fresh-page Chrome timing review
+
+- Local `0.1.86` diagnostic log copy recovery:
+  - diagnostic panel now renders the snapshot inside a `code` block with a `复制日志` action
+  - copy uses `navigator.clipboard.writeText` when available and falls back to selecting the log text
+  - this should make future caption bug reports faster to inspect
+  - pending extension reload and Chrome review
+
+- Local `0.1.85` subtitle diagnostics recovery:
+  - `rows:saved` now records source label, raw row count, cleaned row count, source types, translated row count, and native-caption hiding state
+  - `translation:complete` now records final translated row counts
+  - unexpected translation-flow errors are logged as `translation:error` without throwing an unhandled page error
+  - this should make future caption bugs easier to trace from the diagnostic panel
+  - pending extension reload and Chrome review
+
+- Local `0.1.84` native-caption hiding for fallback recovery:
+  - changed native YouTube CC hiding to activate whenever plugin subtitle rows exist, not only when official rows exist
+  - visible-caption fallback already reads hidden caption DOM with `allowHiddenCaptions`, so fallback collection can continue after hiding the native overlay
+  - this prevents fallback mode from showing both YouTube CC and plugin overlay at the same time
+  - pending extension reload and fallback-video Chrome review
+
+- Local `0.1.83` subtitle mode shortcut recovery:
+  - right-side panel title bar now has a subtitle mode selector for `双语字幕`, `原文字幕`, and `译文字幕`
+  - selector writes through the same local settings path as the full settings panel
+  - switching modes refreshes the right-side list, bottom video overlay, and active row
+  - mode changes are recorded in the diagnostic log as `subtitle-mode-change`
+  - pending extension reload and Chrome review
 
 - Local `0.1.82` right-side subtitle current-row recovery:
   - Chrome QA on `0.1.81` confirmed 217 official subtitle rows and Chinese translations were loaded

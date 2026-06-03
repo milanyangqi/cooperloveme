@@ -28,6 +28,7 @@ export function PopupApp() {
       func: () => {
         const page = window as Window & {
           __yllSafeTimer?: number;
+          __yllSafeOverlayTimer?: number;
           __yllSafeStopCurrentScript?: () => void;
           __yllSafeRows?: unknown[];
           __yllSafeActiveKey?: string;
@@ -37,6 +38,8 @@ export function PopupApp() {
         page.__yllSafeStopCurrentScript?.();
         if (page.__yllSafeTimer) window.clearInterval(page.__yllSafeTimer);
         page.__yllSafeTimer = undefined;
+        if (page.__yllSafeOverlayTimer) window.clearInterval(page.__yllSafeOverlayTimer);
+        page.__yllSafeOverlayTimer = undefined;
         page.__yllSafeRows = [];
         page.__yllSafeActiveKey = undefined;
         page.__yllSafeLoadedVideoId = undefined;
@@ -114,6 +117,21 @@ export function PopupApp() {
     }
   };
 
+  const openPractice = async () => {
+    try {
+      setStatus("正在打开全屏混合练习...");
+      await wakeSafeContentScript("全屏混合练习已唤醒，请在 YouTube 页面查看。");
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return;
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.dispatchEvent(new Event("yll-open-practice"))
+      });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "练习模式打开失败。");
+    }
+  };
+
   return (
     <main className="popup">
       <header className="popup-header">
@@ -123,7 +141,9 @@ export function PopupApp() {
         </div>
       </header>
 
-      <section className="hero-panel">
+      <section className="hero-panel" role="button" tabIndex={0} onClick={openPractice} onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") void openPractice();
+      }}>
         <div className="hero-icon">
           <Mic size={24} />
         </div>
@@ -151,8 +171,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.75 待审核</strong>
-          <p>修复扩展重载后旧脚本后台通信失效提示。</p>
+          <strong>0.1.81 待审核</strong>
+          <p>恢复学习库导出入口，并保存理解选择练习记录。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

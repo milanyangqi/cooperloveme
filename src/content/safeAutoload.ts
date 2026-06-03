@@ -5,6 +5,13 @@ type LabCue = {
   source: "official" | "transcript" | "transcript-panel" | "text-track" | "timedtext" | "visible";
   translatedText?: string;
   translationProvider?: "web" | "ai" | "youtube" | "none";
+  wordTimings?: WordTiming[];
+};
+
+type WordTiming = {
+  text: string;
+  startMs: number;
+  endMs: number;
 };
 
 type RawCaptionTrack = {
@@ -60,20 +67,37 @@ type CapturedTimedText = {
 type LibrarySentence = {
   text?: string;
   translatedText?: string;
+  videoId?: string;
+  cueId?: string;
+  language?: string;
+  startMs?: number;
+  durationMs?: number;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 type LibraryVocab = {
   text?: string;
+  normalizedText?: string;
+  language?: string;
   meaning?: string;
   sourceSentence?: string;
+  translatedSentence?: string;
+  videoId?: string;
+  cueId?: string;
+  mastery?: number;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 type LibraryAttempt = {
   mode?: string;
+  practiceItemId?: string;
+  cueId?: string;
+  answer?: string;
   expected?: string;
   score?: number;
+  durationMs?: number;
   createdAt?: string;
 };
 
@@ -101,17 +125,21 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.75";
+const SCRIPT_VERSION = "0.1.81";
 const POLL_MS = 500;
+const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 350;
+const WORD_HIGHLIGHT_EXTRA_LEAD_MS = 220;
 const MIN_OVERLAY_DURATION_MS = 3200;
+const MIN_WORD_HIGHLIGHT_DURATION_MS = 520;
+const MAX_WORD_HIGHLIGHT_DURATION_MS = 3600;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
-const OFFICIAL_FALLBACK_RETRY_MS = 45000;
-const OFFICIAL_AUTO_ATTEMPTS = 2;
-const OFFICIAL_ATTEMPT_TIMEOUT_MS = 5000;
+const OFFICIAL_FALLBACK_RETRY_MS = 12000;
+const OFFICIAL_AUTO_ATTEMPTS = 3;
+const OFFICIAL_ATTEMPT_TIMEOUT_MS = 9000;
 const USER_SCROLL_PAUSE_MS = 4200;
 
 type SafeSettings = {
@@ -123,6 +151,7 @@ type SafeSettings = {
   translationFontSize: number;
   overlayBackgroundOpacity: number;
   syncOffsetMs: number;
+  wordHighlightOffsetMs: number;
   highlightCurrentWord: boolean;
   sourceFontFamily: string;
   translationFontFamily: string;
@@ -139,6 +168,7 @@ const DEFAULT_SETTINGS: SafeSettings = {
   translationFontSize: 20,
   overlayBackgroundOpacity: 72,
   syncOffsetMs: 0,
+  wordHighlightOffsetMs: 0,
   highlightCurrentWord: true,
   sourceFontFamily: "system-ui",
   translationFontFamily: "system-ui"
@@ -146,6 +176,7 @@ const DEFAULT_SETTINGS: SafeSettings = {
 
 const runtime = window as typeof window & {
   __yllSafeTimer?: number;
+  __yllSafeOverlayTimer?: number;
   __yllSafeLastHref?: string;
   __yllSafeRows?: LabCue[];
   __yllSafeActiveKey?: string;
@@ -208,6 +239,8 @@ function compareSemverish(left: string, right: string) {
 function stopCurrentScriptInstance() {
   if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
   runtime.__yllSafeTimer = undefined;
+  if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
+  runtime.__yllSafeOverlayTimer = undefined;
   runtime.__yllSafeLoadingVideoId = undefined;
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeCanUseVisibleFallback = false;
@@ -339,6 +372,7 @@ function loadSafeSettings(): SafeSettings {
       translationFontSize: Math.min(36, Math.max(14, Number(stored.translationFontSize ?? DEFAULT_SETTINGS.translationFontSize))),
       overlayBackgroundOpacity: Math.min(95, Math.max(20, Number(stored.overlayBackgroundOpacity ?? DEFAULT_SETTINGS.overlayBackgroundOpacity))),
       syncOffsetMs: Math.min(2000, Math.max(-2000, Number(stored.syncOffsetMs ?? DEFAULT_SETTINGS.syncOffsetMs))),
+      wordHighlightOffsetMs: Math.min(1500, Math.max(-1500, Number(stored.wordHighlightOffsetMs ?? DEFAULT_SETTINGS.wordHighlightOffsetMs))),
       highlightCurrentWord: Boolean(stored.highlightCurrentWord ?? DEFAULT_SETTINGS.highlightCurrentWord),
       sourceFontFamily: parseFontFamily(stored.sourceFontFamily),
       translationFontFamily: parseFontFamily(stored.translationFontFamily)
@@ -386,10 +420,10 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
   const words = Array.from(cue.text.matchAll(pattern));
   if (!words.length) return escapeHtml(cue.text);
   const video = getMainVideo();
-  const currentMs = video ? (video.currentTime * 1000) + DEFAULT_DISPLAY_LEAD_MS + settings.syncOffsetMs : cue.startMs;
-  const elapsedMs = Math.max(0, currentMs - cue.startMs);
-  const durationMs = Math.max(cue.durationMs, MIN_OVERLAY_DURATION_MS);
-  const activeWordIndex = Math.min(words.length - 1, Math.max(0, Math.floor((elapsedMs / durationMs) * words.length)));
+  const currentMs = video
+    ? (video.currentTime * 1000) + DEFAULT_DISPLAY_LEAD_MS + WORD_HIGHLIGHT_EXTRA_LEAD_MS + settings.syncOffsetMs + settings.wordHighlightOffsetMs
+    : cue.startMs;
+  const activeWordIndex = activeWordIndexForCue(cue, words, currentMs);
   let output = "";
   let lastIndex = 0;
   words.forEach((match, index) => {
@@ -401,6 +435,57 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
   });
   output += escapeHtml(cue.text.slice(lastIndex));
   return output;
+}
+
+function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs: number) {
+  const timingIndex = activeWordIndexFromTimings(cue, words.length, currentMs);
+  if (timingIndex !== undefined) return timingIndex;
+
+  const elapsedMs = Math.max(0, currentMs - cue.startMs);
+  const weights = words.map((match, index) => {
+    const end = (match.index ?? 0) + match[0].length;
+    const nextStart = words[index + 1]?.index ?? cue.text.length;
+    return wordHighlightWeight(match[0], cue.text.slice(end, nextStart));
+  });
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || words.length || 1;
+  const estimatedWordMs = cue.durationMs / Math.max(1, words.length);
+  const weightedDurationMs = totalWeight * Math.min(225, Math.max(115, estimatedWordMs));
+  const highlightDurationMs = Math.min(
+    MAX_WORD_HIGHLIGHT_DURATION_MS,
+    Math.max(MIN_WORD_HIGHLIGHT_DURATION_MS, Math.min(cue.durationMs, weightedDurationMs))
+  );
+  const targetWeight = Math.min(totalWeight - 0.001, Math.max(0, (elapsedMs / highlightDurationMs) * totalWeight));
+  let cursor = 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    cursor += weights[index];
+    if (targetWeight < cursor) return index;
+  }
+  return Math.max(0, words.length - 1);
+}
+
+function activeWordIndexFromTimings(cue: LabCue, wordCountValue: number, currentMs: number) {
+  const timings = (cue.wordTimings ?? []).filter((timing) => timing.endMs > timing.startMs);
+  if (!timings.length || Math.abs(timings.length - wordCountValue) > Math.max(2, wordCountValue * 0.35)) return undefined;
+  const normalizedCurrentMs = Math.max(cue.startMs, currentMs);
+  const activeIndex = timings.findIndex((timing, index) => {
+    const nextStart = timings[index + 1]?.startMs ?? timing.endMs;
+    return normalizedCurrentMs >= timing.startMs - 80 && normalizedCurrentMs < Math.max(timing.endMs, nextStart);
+  });
+  if (activeIndex >= 0) return Math.min(wordCountValue - 1, activeIndex);
+  for (let index = timings.length - 1; index >= 0; index -= 1) {
+    if (timings[index].startMs <= normalizedCurrentMs) return Math.min(wordCountValue - 1, index);
+  }
+  return 0;
+}
+
+function wordHighlightWeight(word: string, followingText: string) {
+  const normalized = word.toLowerCase();
+  const compactFunctionWords = new Set(["a", "an", "the", "to", "of", "in", "on", "at", "and", "or", "is", "are", "was", "were", "be", "do", "did", "it", "we", "you", "i", "he", "she", "my", "our"]);
+  const base = compactFunctionWords.has(normalized)
+    ? 0.58
+    : Math.min(1.75, Math.max(0.78, Math.sqrt(Math.max(1, normalized.length)) / 1.65));
+  const pause = /[,.!?;:]/.test(followingText) ? 0.22 : 0;
+  return base + pause;
 }
 
 function formatClock(ms: number) {
@@ -553,7 +638,8 @@ function mergeAdjacentCues(cues: LabCue[]) {
     current = {
       ...current,
       durationMs: combinedDurationMs,
-      text: combinedText
+      text: combinedText,
+      wordTimings: [...(current.wordTimings ?? []), ...(nextCue.wordTimings ?? [])].filter((timing) => timing.text)
     };
   }
 
@@ -832,6 +918,21 @@ function installStyle() {
       color: #ffc857;
       font-size: 13px;
     }
+    #${LIBRARY_PANEL_ID} .yll-library-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 2px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-library-actions button {
+      padding: 8px 10px;
+      color: #161616;
+      background: #ffc857;
+      border: 0;
+      border-radius: 7px;
+      font-weight: 820;
+      cursor: pointer;
+    }
     #${LIBRARY_PANEL_ID} .yll-library-item {
       padding: 8px 0;
       border-top: 1px solid rgba(255,255,255,.08);
@@ -1106,6 +1207,8 @@ function mountPanel() {
     document.documentElement.classList.remove("yll-hide-native-captions");
     if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
     runtime.__yllSafeTimer = undefined;
+    if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
+    runtime.__yllSafeOverlayTimer = undefined;
     runtime.__yllSafeTranslationToken = undefined;
   });
   panel.querySelector<HTMLButtonElement>('[data-yll-action="settings"]')?.addEventListener("click", () => {
@@ -1247,6 +1350,12 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       <div class="yll-library-stat"><strong>${vocabItems.length}</strong>词汇</div>
       <div class="yll-library-stat"><strong>${practiceAttempts.length}</strong>练习</div>
     </div>
+    <div class="yll-library-actions">
+      ${sentenceNotes.length ? `<button type="button" data-library-practice-sentences>练习收藏句</button>` : ""}
+      <button type="button" data-library-export-json>导出 JSON</button>
+      <button type="button" data-library-export-csv>导出 CSV</button>
+      <button type="button" data-library-export-anki>导出 Anki</button>
+    </div>
     ${renderLibrarySection("最近收藏句", sentenceNotes.slice(0, 6), (item) => ({
       main: item.text ?? "",
       sub: item.translatedText ?? formatLibraryTime(item.createdAt)
@@ -1261,6 +1370,143 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
     }))}
   `;
   panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => panel.remove());
+  panel.querySelector<HTMLButtonElement>("[data-library-export-json]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const originalLabel = button.textContent ?? "导出 JSON";
+    button.textContent = "导出中...";
+    try {
+      const response = await sendRuntimeMessage<unknown>({ type: "EXPORT_DATA" });
+      if (!response?.ok) throw new Error(response?.error ?? "导出失败");
+      downloadTextFile(`youtube-language-lab-${dateSlug()}.json`, JSON.stringify(response.data, null, 2), "application/json");
+      button.textContent = "已导出";
+    } catch (error) {
+      button.textContent = `失败：${toErrorMessage(error).slice(0, 18)}`;
+      window.setTimeout(() => {
+        button.textContent = originalLabel;
+      }, 1800);
+    }
+  });
+  panel.querySelector<HTMLButtonElement>("[data-library-export-csv]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    downloadTextFile(`youtube-language-lab-library-${dateSlug()}.csv`, libraryToCsv({ vocabItems, sentenceNotes, practiceAttempts }), "text/csv;charset=utf-8");
+    button.textContent = "已导出 CSV";
+    window.setTimeout(() => {
+      button.textContent = "导出 CSV";
+    }, 1400);
+  });
+  panel.querySelector<HTMLButtonElement>("[data-library-export-anki]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    downloadTextFile(`youtube-language-lab-anki-${dateSlug()}.csv`, sentenceNotesToAnkiCsv(sentenceNotes), "text/csv;charset=utf-8");
+    button.textContent = "已导出 Anki";
+    window.setTimeout(() => {
+      button.textContent = "导出 Anki";
+    }, 1400);
+  });
+  panel.querySelector<HTMLButtonElement>("[data-library-practice-sentences]")?.addEventListener("click", () => {
+    const practiceRows = sentenceNotesToPracticeRows(sentenceNotes);
+    if (!practiceRows.length) return;
+    panel.remove();
+    openPracticeOverlay(practiceRows, 0);
+  });
+}
+
+function sentenceNotesToPracticeRows(sentenceNotes: LibrarySentence[]) {
+  return sentenceNotes
+    .filter((item) => item.text?.trim())
+    .map((item, index) => ({
+      startMs: Number.isFinite(item.startMs) ? Number(item.startMs) : index * 3000,
+      durationMs: Math.max(900, Number(item.durationMs ?? 2600)),
+      text: item.text ?? "",
+      translatedText: item.translatedText,
+      source: "official" as const
+    }));
+}
+
+function dateSlug(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function csvEscape(value: unknown) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function csvLine(values: unknown[]) {
+  return values.map(csvEscape).join(",");
+}
+
+function downloadTextFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function libraryToCsv(library: Required<LibrarySnapshot>) {
+  const rows: string[] = [
+    csvLine(["type", "text", "translation_or_meaning", "mode", "score", "video_id", "cue_id", "start_ms", "duration_ms", "created_at"])
+  ];
+  library.sentenceNotes.forEach((item) => {
+    rows.push(csvLine([
+      "sentence",
+      item.text,
+      item.translatedText,
+      "",
+      "",
+      item.videoId,
+      item.cueId,
+      item.startMs,
+      item.durationMs,
+      item.createdAt
+    ]));
+  });
+  library.vocabItems.forEach((item) => {
+    rows.push(csvLine([
+      "vocab",
+      item.text,
+      item.meaning || item.translatedSentence || item.sourceSentence,
+      "",
+      item.mastery,
+      item.videoId,
+      item.cueId,
+      "",
+      "",
+      item.createdAt
+    ]));
+  });
+  library.practiceAttempts.forEach((item) => {
+    rows.push(csvLine([
+      "practice",
+      item.expected,
+      item.answer,
+      practiceModeLabel(item.mode),
+      item.score,
+      "",
+      item.cueId,
+      "",
+      item.durationMs,
+      item.createdAt
+    ]));
+  });
+  return `${rows.join("\n")}\n`;
+}
+
+function sentenceNotesToAnkiCsv(sentenceNotes: LibrarySentence[]) {
+  const rows = sentenceNotes
+    .filter((item) => item.text?.trim())
+    .map((item) => csvLine([
+      item.text,
+      item.translatedText ?? "",
+      item.videoId ?? "",
+      item.startMs === undefined ? "" : formatClock(Number(item.startMs))
+    ]));
+  return `${csvLine(["Front", "Back", "Video", "Time"])}\n${rows.join("\n")}\n`;
 }
 
 function sortLibraryItems<T extends { createdAt?: string }>(items: T[]) {
@@ -1418,6 +1664,10 @@ function settingsPanelHtml(settings: SafeSettings) {
     <label>
       <span>同步校准</span>
       <span><input type="range" min="-2000" max="2000" step="50" data-setting="syncOffsetMs" value="${settings.syncOffsetMs}"> <span class="yll-setting-value">${settings.syncOffsetMs}ms</span></span>
+    </label>
+    <label>
+      <span>逐词校准</span>
+      <span><input type="range" min="-1500" max="1500" step="50" data-setting="wordHighlightOffsetMs" value="${settings.wordHighlightOffsetMs}"> <span class="yll-setting-value">${settings.wordHighlightOffsetMs}ms</span></span>
     </label>
     <label>
       <span>背景透明度</span>
@@ -1647,9 +1897,9 @@ function quizOptions(rows: LabCue[], cue: LabCue) {
     .sort((a, b) => a.localeCompare(b));
 }
 
-function openPracticeOverlay() {
-  const rows = sortedPracticeRows();
-  const initialCue = currentCue();
+function openPracticeOverlay(practiceRows?: LabCue[], startIndex = 0) {
+  const rows = (practiceRows?.length ? practiceRows : sortedPracticeRows()).sort((a, b) => a.startMs - b.startMs);
+  const initialCue = practiceRows?.[startIndex] ?? currentCue();
   if (!initialCue || !rows.length) {
     setStatus("还没有可练习的字幕句子。");
     return;
@@ -1659,7 +1909,7 @@ function openPracticeOverlay() {
   document.getElementById(PRACTICE_ID)?.remove();
   const overlay = document.createElement("section");
   overlay.id = PRACTICE_ID;
-  let index = currentCueIndex(rows, initialCue);
+  let index = Math.min(rows.length - 1, Math.max(0, practiceRows?.length ? startIndex : currentCueIndex(rows, initialCue)));
   let mode: "shadowing" | "dictation" | "cloze" | "quiz" = "shadowing";
   let recorder: MediaRecorder | undefined;
   let recordingStartedAt = 0;
@@ -1843,11 +2093,17 @@ function openPracticeOverlay() {
       if (feedback) feedback.textContent = `答案：${clozeExpected.join(" / ")}`;
     });
     overlay.querySelectorAll<HTMLElement>("[data-practice-option]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const feedback = overlay.querySelector<HTMLElement>("[data-practice-feedback]");
         const selected = button.dataset.practiceOption ?? "";
         const answer = cue.translatedText?.trim() || cue.text;
-        if (feedback) feedback.textContent = selected === answer ? "选择正确。" : `再试一次。正确含义：${answer}`;
+        const correct = selected === answer;
+        const saved = await savePracticeAttempt(cue, "quiz", correct ? 100 : 0, 0, selected);
+        if (feedback) {
+          feedback.textContent = correct
+            ? `选择正确。${saved ? "已保存练习记录。" : ""}`
+            : `再试一次。正确含义：${answer}${saved ? "。已保存练习记录。" : ""}`;
+        }
       });
     });
   };
@@ -1986,18 +2242,7 @@ function updateActiveCue() {
   if (!rows.length || !video || !list) return;
 
   const settings = loadSafeSettings();
-  const currentMs = (video.currentTime * 1000) + DEFAULT_DISPLAY_LEAD_MS + settings.syncOffsetMs;
-  const sortedRows = [...rows].sort((a, b) => a.startMs - b.startMs);
-  const active =
-    sortedRows.find((cue, index) => {
-      const nextStartMs = sortedRows[index + 1]?.startMs ?? Number.POSITIVE_INFINITY;
-      const holdUntilMs = Math.min(
-        cue.startMs + Math.max(cue.durationMs, MIN_OVERLAY_DURATION_MS),
-        nextStartMs + 350
-      );
-      return currentMs >= cue.startMs - 250 && currentMs <= holdUntilMs;
-    }) ??
-    [...sortedRows].reverse().find((cue) => cue.startMs <= currentMs);
+  const active = selectActiveCue(rows, syncedCurrentMs(video, settings));
   if (!active) {
     setOverlayCue(undefined);
     return;
@@ -2029,6 +2274,41 @@ function updateActiveCue() {
       list.scrollTo({ top: targetTop, behavior: "auto" });
     }
   }
+}
+
+function syncedCurrentMs(video: HTMLVideoElement, settings: SafeSettings) {
+  return (video.currentTime * 1000) + DEFAULT_DISPLAY_LEAD_MS + settings.syncOffsetMs;
+}
+
+function selectActiveCue(rows: LabCue[], currentMs: number) {
+  const sortedRows = [...rows].sort((a, b) => a.startMs - b.startMs);
+  return (
+    sortedRows.find((cue, index) => {
+      const nextStartMs = sortedRows[index + 1]?.startMs ?? Number.POSITIVE_INFINITY;
+      const holdUntilMs = Math.min(
+        cue.startMs + Math.max(cue.durationMs, MIN_OVERLAY_DURATION_MS),
+        nextStartMs + 350
+      );
+      return currentMs >= cue.startMs - 250 && currentMs <= holdUntilMs;
+    }) ??
+    [...sortedRows].reverse().find((cue) => cue.startMs <= currentMs)
+  );
+}
+
+function refreshOverlayHighlight() {
+  const rows = runtime.__yllSafeRows ?? [];
+  const video = getMainVideo();
+  const overlay = document.getElementById(OVERLAY_ID);
+  if (!rows.length || !video || !overlay?.classList.contains("is-visible")) return;
+
+  const settings = loadSafeSettings();
+  if (!settings.highlightCurrentWord) return;
+  const active = selectActiveCue(rows, syncedCurrentMs(video, settings));
+  if (!active || (active.source === "visible" && !runtime.__yllSafeCanUseVisibleFallback)) {
+    setOverlayCue(undefined);
+    return;
+  }
+  setOverlayCue(active);
 }
 
 function saveRows(rows: LabCue[], sourceLabel: string) {
@@ -3092,21 +3372,53 @@ async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: b
   }
 }
 
-function parseJson3Rows(videoId: string, data: { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> }, source: LabCue["source"]) {
+function parseJson3Rows(videoId: string, data: { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string; tOffsetMs?: number }> }> }, source: LabCue["source"]) {
   return (data.events ?? [])
     .map((event) => {
       const text = cleanText((event.segs ?? []).map((seg) => seg.utf8 ?? "").join(""));
       if (!text || event.tStartMs === undefined) return undefined;
+      const durationMs = Math.max(500, event.dDurationMs ?? 1800);
       return {
         startMs: event.tStartMs,
-        durationMs: Math.max(500, event.dDurationMs ?? 1800),
+        durationMs,
         text,
-        source
+        source,
+        wordTimings: json3WordTimings(event.tStartMs, durationMs, event.segs ?? [])
       };
     })
     .filter(Boolean)
     .map((cue) => cue as LabCue)
     .filter((cue) => cue.text && videoId);
+}
+
+function json3WordTimings(startMs: number, durationMs: number, segs: Array<{ utf8?: string; tOffsetMs?: number }>) {
+  const timedSegments = segs
+    .map((seg, index) => ({
+      text: seg.utf8 ?? "",
+      offsetMs: Number.isFinite(seg.tOffsetMs) ? Math.max(0, Number(seg.tOffsetMs)) : undefined,
+      index
+    }))
+    .filter((seg) => seg.text.trim());
+  if (!timedSegments.some((seg) => seg.offsetMs !== undefined)) return undefined;
+
+  const output: WordTiming[] = [];
+  timedSegments.forEach((segment, segmentIndex) => {
+    const words = Array.from(segment.text.matchAll(/(\p{L}[\p{L}\p{M}'-]*|\p{N}+)/gu));
+    if (!words.length) return;
+    const segmentStartOffset = segment.offsetMs ?? timedSegments.slice(0, segmentIndex).reverse().find((item) => item.offsetMs !== undefined)?.offsetMs ?? 0;
+    const nextTimedSegment = timedSegments.slice(segmentIndex + 1).find((item) => item.offsetMs !== undefined);
+    const segmentEndOffset = Math.max(segmentStartOffset + 80, nextTimedSegment?.offsetMs ?? durationMs);
+    const wordDurationMs = Math.max(70, (segmentEndOffset - segmentStartOffset) / words.length);
+    words.forEach((match, wordIndex) => {
+      const wordStartMs = startMs + segmentStartOffset + wordDurationMs * wordIndex;
+      output.push({
+        text: match[0],
+        startMs: Math.round(wordStartMs),
+        endMs: Math.round(Math.min(startMs + durationMs, wordStartMs + wordDurationMs))
+      });
+    });
+  });
+  return output.length ? output : undefined;
 }
 
 async function loadDirectTimedTextRows(videoId: string) {
@@ -3267,8 +3579,13 @@ async function loadRowsForCurrentVideo() {
   for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
     setStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`);
     try {
-      addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS });
-      const officialRows = await withTimeout(loadOfficialRows(videoId), OFFICIAL_ATTEMPT_TIMEOUT_MS, "official auto attempt");
+      const includeSlowPaths = attempt === OFFICIAL_AUTO_ATTEMPTS - 1;
+      addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS, includeSlowPaths });
+      const officialRows = await withTimeout(
+        loadOfficialRows(videoId, { includeSlowPaths }),
+        OFFICIAL_ATTEMPT_TIMEOUT_MS,
+        "official auto attempt"
+      );
       addDebugLog("load:official-result", { rows: officialRows.length, sources: Array.from(new Set(officialRows.map((row) => row.source))) });
       if (officialRows.length) {
         const sourceLabel =
@@ -3331,7 +3648,7 @@ async function loadRowsForCurrentVideo() {
   ensureNativeCaptionsForFallback();
   const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
   addDebugLog("load:fallback-enabled", { debug });
-  setStatus(`官方字幕暂未读到，稍后会自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`);
+  setStatus(`官方字幕暂未读到，${Math.round(OFFICIAL_FALLBACK_RETRY_MS / 1000)} 秒后自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`);
 }
 
 function captureVisibleFallback() {
@@ -3443,13 +3760,25 @@ function start() {
   announceScriptVersion();
   runtime.__yllSafeDebugSnapshot = debugSnapshot;
   if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
+  if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
   tick();
   runtime.__yllSafeTimer = window.setInterval(tick, POLL_MS);
+  runtime.__yllSafeOverlayTimer = window.setInterval(refreshOverlayHighlight, WORD_HIGHLIGHT_POLL_MS);
 }
 
 window.addEventListener("yt-navigate-finish", () => window.setTimeout(start, 350));
 window.addEventListener("popstate", () => window.setTimeout(start, 350));
+window.addEventListener("yll-open-practice", () => {
+  if (!(runtime.__yllSafeRows ?? []).length) {
+    setStatus("正在读取字幕，稍后再打开练习模式。");
+    void loadRowsForCurrentVideo().then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
+    return;
+  }
+  openPracticeOverlay();
+});
 window.addEventListener("yll-safe-reload", () => {
+  if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
+  runtime.__yllSafeOverlayTimer = undefined;
   runtime.__yllSafeLoadedVideoId = undefined;
   runtime.__yllSafeLoadingVideoId = undefined;
   runtime.__yllSafeIsLoadingOfficial = false;

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-02 21:57:26 CST
+Last updated: 2026-06-03 13:05:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,24 +18,24 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | Done | 2026-06-02 13:08 CST | `0.1.58` Chrome runtime test loaded 267 official rows and 267 translated rows | Must remain the primary path. Diagnostic logs stay available for future failures. |
+| Official YouTube caption loading | In Review | 2026-06-03 08:45 CST | `0.1.78` increases automatic official-track retries, waits longer, and enables slow paths on the last automatic attempt | Must remain the primary path. Diagnostic logs stay available for future failures. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | Done | 2026-06-02 | Runtime check showed native visible count 0 | Keep default enabled to avoid duplicate subtitle overlays. |
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
 | Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-02 18:17 CST | `0.1.67` moves active row to the lower-middle area and pauses auto-scroll while the user scrolls | Needs extension reload and Chrome visual review. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
-| Bilingual overlay on video | In Review | 2026-06-02 21:44 CST | `0.1.74` adds approximate word highlighting and manual sync offset | Needs Chrome visual timing review. |
+| Bilingual overlay on video | In Review | 2026-06-03 09:25 CST | `0.1.79` preserves json3 segment offsets for word highlighting, adds weighted fallback timing, and exposes word-only calibration | Needs Chrome visual timing review. |
 | Free translation fallback | Done | 2026-06-02 | Runtime test generated 289 translated rows | Uses free translation path before paid AI configuration. |
 | Click word for translation | Partial | 2026-06-02 | Word spans and popover implemented | Needs broader UX review and vocabulary save flow. |
 | Subtitle settings panel | In Review | 2026-06-02 21:44 CST | `0.1.74` adds sync calibration and word-highlight toggle to existing style controls | Needs manual Chrome review; advanced highlight-style editor still planned. |
-| Practice mode shell | In Review | 2026-06-02 15:32 CST | `0.1.63` restores mode tabs, sentence navigation, replay, and feedback | Needs manual Chrome review; full Trancy-style layout still planned. |
+| Practice mode shell | In Review | 2026-06-03 09:51 CST | `0.1.80` restores the popup full-practice entry and lets saved sentences open the mixed-practice overlay | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
-| Comprehension quiz mode | Partial | 2026-06-02 15:32 CST | `0.1.63` adds translation-choice quiz from nearby subtitles | Needs generated questions and richer feedback. |
-| Sentence save / collection | In Review | 2026-06-02 21:31 CST | `0.1.73` refreshes versioned styles so the local library renders correctly after extension reload | Needs Chrome review and richer library management. |
+| Comprehension quiz mode | In Review | 2026-06-03 13:05 CST | `0.1.81` saves quiz attempts to the local practice history after an option is selected | Needs generated questions and richer feedback. |
+| Sentence save / collection | In Review | 2026-06-03 13:05 CST | `0.1.81` keeps saved-sentence practice and adds library export entry points | Needs Chrome review and richer library management. |
 | Vocabulary library | In Review | 2026-06-02 21:31 CST | `0.1.73` refreshes versioned styles so saved vocabulary renders correctly in the local library | Word save was verified on `0.1.66`; broader library UI now awaits review. |
-| Export / Anki / CSV | Planned | Pending | Export bundle exists, advanced export not restored | Planned for Pro/high-value workflow. |
+| Export / Anki / CSV | In Review | 2026-06-03 13:05 CST | `0.1.81` adds JSON, CSV, and Anki CSV exports inside the local library panel | Needs Chrome download review; advanced Pro export can be expanded later. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
@@ -44,8 +44,55 @@ This file is the project memory for feature recovery. Update it whenever a featu
 
 ## Timeline
 
+### 2026-06-03
+
+- Local `0.1.81` library export and quiz-history recovery:
+  - local library panel now exposes `导出 JSON`, `导出 CSV`, and `导出 Anki` actions
+  - JSON export reuses the existing background `EXPORT_DATA` bundle
+  - CSV export includes sentence, vocabulary, and practice rows in one local-first file
+  - Anki CSV export maps saved sentences to `Front`, `Back`, `Video`, and `Time`
+  - comprehension quiz option clicks now save a `quiz` practice attempt with score and selected answer
+  - pending extension reload and Chrome download review
+
+- Local `0.1.80` practice entry recovery:
+  - user paused word-highlight sync work and asked to continue restoring other features
+  - popup hero now opens the current page's full-screen mixed practice instead of being a static card
+  - content script listens for `yll-open-practice` and opens practice after captions are ready
+  - local library now shows a `练习收藏句` action when saved sentences exist
+  - saved sentences are converted into practice rows so shadowing, dictation, cloze, and quiz can reuse the same practice overlay
+  - pending extension reload and manual Chrome review
+
+- Local `0.1.79` word-level sync refinement:
+  - user reported subtitle word highlighting improved but still could not fully match audio
+  - added `wordTimings` support to preserve YouTube json3 segment offsets when available
+  - video overlay now prefers official segment timing for current-word highlighting before using heuristic timing
+  - heuristic fallback now weights function words, longer content words, and punctuation pauses instead of splitting a cue evenly
+  - added a separate `逐词校准` setting so word highlighting can be adjusted without moving whole-sentence subtitle sync
+  - Chrome takeover transport was unavailable (`Transport closed`), so this remains pending manual reload and visual review
+
+- Local `0.1.78` official-caption retry and word-sync calibration:
+  - user reported the page appeared not to load official captions after reload
+  - official auto loading now tries 3 times, waits up to 9 seconds per official attempt, and uses slow official paths on the last automatic attempt
+  - fallback mode now retries official captions every 12 seconds instead of waiting 45 seconds
+  - word highlighting now has a small extra lead independent of the sentence display lead so highlighted words can better match speech timing
+  - pending extension reload and manual Chrome review because Chrome takeover transport is currently unavailable
+
+- Local `0.1.77` word-highlight skip fix:
+  - user reported the highlighted word did not visit every word and skipped ahead on some captions
+  - found the overlay was still refreshed by the 500ms main subtitle loop, so short cues could jump over intermediate words
+  - added an independent 90ms overlay refresh loop that only updates the video subtitle highlight
+  - extracted active-cue selection into a shared helper so overlay word highlighting can refresh frequently without forcing right-side list scrolling
+  - popup wake cleanup now also clears the overlay refresh timer to avoid stale content-script behavior after extension reload
+  - pending extension reload and Chrome visual review
+
 ### 2026-06-02
 
+- Local `0.1.76` subtitle word-highlight timing fix:
+  - user reported highlighted words moved slower than the audio
+  - found word highlighting reused the overlay minimum hold duration, which could stretch short cues to 3200ms
+  - added a separate word-highlight duration with 900ms lower bound and 3600ms upper bound
+  - word highlighting now uses the cue's own duration when possible, while overlay visibility can still stay readable
+  - pending extension reload and visual timing review
 - Local `0.1.75` invalidated extension context handling:
   - user saw learning library panel but it failed with `Extension context invalidated`
   - wrapped `chrome.runtime.sendMessage` in synchronous and asynchronous error handling

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-03 18:28:00 CST
+Last updated: 2026-06-03 18:42:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -25,7 +25,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Right-side newest-on-top / upward scroll behavior | Done | 2026-06-03 13:47 CST | `0.1.82` Chrome QA showed the active row visible around the middle of the panel after official subtitles loaded | Keep monitoring on long videos and fallback videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
 | Bilingual overlay on video | In Review | 2026-06-03 09:25 CST | `0.1.79` preserves json3 segment offsets for word highlighting, adds weighted fallback timing, and exposes word-only calibration | Needs Chrome visual timing review. |
-| Free translation fallback | In Review | 2026-06-03 18:28 CST | `0.1.89` cancels stale fallback translation tasks when official rows replace the list and prevents 0 translated rows from being marked successful | Needs reload and Chrome review on an official-caption video. |
+| Free translation fallback | In Review | 2026-06-03 18:42 CST | `0.1.90` adds capped automatic retranslation when rows exist but translations are missing | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | Partial | 2026-06-02 | Word spans and popover implemented | Needs broader UX review and vocabulary save flow. |
 | Subtitle settings panel | In Review | 2026-06-03 14:10 CST | `0.1.83` adds a right-panel subtitle-mode selector and logs mode changes for diagnostics | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-03 09:51 CST | `0.1.80` restores the popup full-practice entry and lets saved sentences open the mixed-practice overlay | Needs manual Chrome review; full Trancy-style layout still planned. |
@@ -45,6 +45,12 @@ This file is the project memory for feature recovery. Update it whenever a featu
 ## Timeline
 
 ### 2026-06-03
+
+- Local `0.1.90` translation auto-retry recovery:
+  - added a capped auto-retry guard for cases where subtitle rows exist but no translated rows are rendered
+  - retry is active only when translations are enabled and subtitle mode is not source-only
+  - retry state is scoped to the current subtitle row generation and limited to three attempts to avoid repeated free-translation calls
+  - pending extension reload and Chrome review
 
 - Local `0.1.89` translation race recovery:
   - Chrome diagnostics on `0.1.88` showed fallback translation completed after official captions replaced the row list

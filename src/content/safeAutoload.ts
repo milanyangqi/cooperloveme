@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.89";
+const SCRIPT_VERSION = "0.1.90";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -189,6 +189,9 @@ const runtime = window as typeof window & {
   __yllSafeTranslationToken?: number;
   __yllSafeTranslatedVideoId?: string;
   __yllSafeIsTranslating?: boolean;
+  __yllSafeTranslationRetryGeneration?: number;
+  __yllSafeTranslationRetryCount?: number;
+  __yllSafeLastTranslationRetryAt?: number;
   __yllSafeSettings?: SafeSettings;
   __yllSafeScriptVersion?: string;
   __yllSafeStopCurrentScript?: () => void;
@@ -2885,6 +2888,38 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
   }
 }
 
+function maybeRetryMissingTranslations() {
+  const settings = loadSafeSettings();
+  if (!settings.showTranslations || settings.subtitleMode === "source") return;
+  const rows = runtime.__yllSafeRows ?? [];
+  if (!rows.length || runtime.__yllSafeIsTranslating) return;
+  const translatedRows = rows.filter((cue) => cue.translatedText).length;
+  if (translatedRows >= rows.length) return;
+
+  const generation = runtime.__yllSafeRowsGeneration ?? 0;
+  if (runtime.__yllSafeTranslationRetryGeneration !== generation) {
+    runtime.__yllSafeTranslationRetryGeneration = generation;
+    runtime.__yllSafeTranslationRetryCount = 0;
+    runtime.__yllSafeLastTranslationRetryAt = undefined;
+  }
+
+  const now = Date.now();
+  const retryCount = runtime.__yllSafeTranslationRetryCount ?? 0;
+  if (retryCount >= 3) return;
+  if (runtime.__yllSafeLastTranslationRetryAt && now - runtime.__yllSafeLastTranslationRetryAt < 7000) return;
+
+  runtime.__yllSafeTranslationRetryCount = retryCount + 1;
+  runtime.__yllSafeLastTranslationRetryAt = now;
+  runtime.__yllSafeTranslatedVideoId = undefined;
+  addDebugLog("translation:auto-retry", {
+    generation,
+    retry: runtime.__yllSafeTranslationRetryCount,
+    rows: rows.length,
+    translatedRows
+  });
+  void translateRowsForCurrentVideo("自动翻译补跑");
+}
+
 async function lookupWord(word: string, startMs?: string) {
   const cleaned = cleanText(word).slice(0, 48);
   if (!cleaned) return;
@@ -3899,6 +3934,9 @@ function tick() {
       runtime.__yllSafeTranslationToken = undefined;
       runtime.__yllSafeTranslatedVideoId = undefined;
       runtime.__yllSafeIsTranslating = false;
+      runtime.__yllSafeTranslationRetryGeneration = undefined;
+      runtime.__yllSafeTranslationRetryCount = undefined;
+      runtime.__yllSafeLastTranslationRetryAt = undefined;
       runtime.__yllSafeLastOfficialAttemptAt = undefined;
       runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
@@ -3928,6 +3966,9 @@ function tick() {
       runtime.__yllSafeTranslationToken = undefined;
       runtime.__yllSafeTranslatedVideoId = undefined;
       runtime.__yllSafeIsTranslating = false;
+      runtime.__yllSafeTranslationRetryGeneration = undefined;
+      runtime.__yllSafeTranslationRetryCount = undefined;
+      runtime.__yllSafeLastTranslationRetryAt = undefined;
       runtime.__yllSafeLastOfficialAttemptAt = undefined;
       runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
@@ -3946,6 +3987,7 @@ function tick() {
     });
     captureVisibleFallback();
     updateActiveCue();
+    maybeRetryMissingTranslations();
   } catch (error) {
     mountPanel();
     document.documentElement.classList.remove("yll-hide-native-captions");
@@ -3988,6 +4030,9 @@ window.addEventListener("yll-safe-reload", () => {
   runtime.__yllSafeTranslationToken = undefined;
   runtime.__yllSafeTranslatedVideoId = undefined;
   runtime.__yllSafeIsTranslating = false;
+  runtime.__yllSafeTranslationRetryGeneration = undefined;
+  runtime.__yllSafeTranslationRetryCount = undefined;
+  runtime.__yllSafeLastTranslationRetryAt = undefined;
   runtime.__yllSafeLastOfficialAttemptAt = undefined;
   runtime.__yllSafeOfficialAttemptCount = undefined;
   runtime.__yllSafeLastOfficialDebug = undefined;

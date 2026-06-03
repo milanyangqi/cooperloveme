@@ -171,8 +171,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.81 待审核</strong>
-          <p>恢复学习库导出入口，并保存理解选择练习记录。</p>
+          <strong>0.1.82 待审核</strong>
+          <p>修复右侧字幕当前句自动定位，避免卡在底部。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-03 13:05:00 CST
+Last updated: 2026-06-03 13:47:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -22,7 +22,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | Done | 2026-06-02 | Runtime check showed native visible count 0 | Keep default enabled to avoid duplicate subtitle overlays. |
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
-| Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-02 18:17 CST | `0.1.67` moves active row to the lower-middle area and pauses auto-scroll while the user scrolls | Needs extension reload and Chrome visual review. |
+| Right-side newest-on-top / upward scroll behavior | Done | 2026-06-03 13:47 CST | `0.1.82` Chrome QA showed the active row visible around the middle of the panel after official subtitles loaded | Keep monitoring on long videos and fallback videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
 | Bilingual overlay on video | In Review | 2026-06-03 09:25 CST | `0.1.79` preserves json3 segment offsets for word highlighting, adds weighted fallback timing, and exposes word-only calibration | Needs Chrome visual timing review. |
 | Free translation fallback | Done | 2026-06-02 | Runtime test generated 289 translated rows | Uses free translation path before paid AI configuration. |
@@ -45,6 +45,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
 ## Timeline
 
 ### 2026-06-03
+
+- Local `0.1.82` right-side subtitle current-row recovery:
+  - Chrome QA on `0.1.81` confirmed 217 official subtitle rows and Chinese translations were loaded
+  - found the active row at `0:48` existed but was above the visible list while the panel remained pinned at the bottom
+  - list re-render now suppresses automatic scroll events so they are not mistaken for user manual browsing
+  - active-row scrolling now still pulls the row into view when it is completely offscreen
+  - Chrome QA after reload confirmed `0.1.82`, 184 official rows, Chinese translations, native CC hidden, and active row visible at panel midpoint
 
 - Local `0.1.81` library export and quiz-history recovery:
   - local library panel now exposes `导出 JSON`, `导出 CSV`, and `导出 Anki` actions

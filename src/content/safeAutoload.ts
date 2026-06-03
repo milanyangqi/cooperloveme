@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.81";
+const SCRIPT_VERSION = "0.1.82";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -2193,6 +2193,8 @@ function renderRows(rows: LabCue[]) {
   const settings = loadSafeSettings();
   list.classList.toggle("hide-translations", !settings.showTranslations || settings.subtitleMode === "source");
   const sorted = [...rows].sort((a, b) => b.startMs - a.startMs);
+  runtime.__yllSafeSuppressListScrollUntil = Date.now() + 800;
+  runtime.__yllSafeLastManualListScrollAt = 0;
   list.innerHTML = sorted
     .map((cue) => {
       const key = cueKey(cue);
@@ -2265,7 +2267,10 @@ function updateActiveCue() {
   activeRow?.classList.add("is-active");
   if (activeRow) {
     const userIsReadingElsewhere = Date.now() - (runtime.__yllSafeLastManualListScrollAt ?? 0) < USER_SCROLL_PAUSE_MS;
-    if (userIsReadingElsewhere) return;
+    const activeTop = activeRow.offsetTop - list.scrollTop;
+    const activeBottom = activeTop + activeRow.offsetHeight;
+    const activeIsVisible = activeBottom > 0 && activeTop < list.clientHeight;
+    if (userIsReadingElsewhere && activeIsVisible) return;
     const rowTop = activeRow.offsetTop;
     const rowCenter = rowTop + activeRow.offsetHeight / 2;
     const targetTop = Math.max(0, rowCenter - list.clientHeight * 0.68);

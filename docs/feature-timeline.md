@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-03 18:42:00 CST
+Last updated: 2026-06-04 12:15:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -24,7 +24,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
 | Right-side newest-on-top / upward scroll behavior | Done | 2026-06-03 13:47 CST | `0.1.82` Chrome QA showed the active row visible around the middle of the panel after official subtitles loaded | Keep monitoring on long videos and fallback videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
-| Bilingual overlay on video | In Review | 2026-06-03 09:25 CST | `0.1.79` preserves json3 segment offsets for word highlighting, adds weighted fallback timing, and exposes word-only calibration | Needs Chrome visual timing review. |
+| Bilingual overlay on video | In Review | 2026-06-04 12:15 CST | `0.1.91` decouples word highlight timing from the subtitle display lead and stretches fallback word progression across the full cue duration | Needs extension reload and Chrome visual timing review. |
 | Free translation fallback | In Review | 2026-06-03 18:42 CST | `0.1.90` adds capped automatic retranslation when rows exist but translations are missing | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | Partial | 2026-06-02 | Word spans and popover implemented | Needs broader UX review and vocabulary save flow. |
 | Subtitle settings panel | In Review | 2026-06-03 14:10 CST | `0.1.83` adds a right-panel subtitle-mode selector and logs mode changes for diagnostics | Needs extension reload and Chrome review. |
@@ -43,6 +43,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Stale content-script protection | In Review | 2026-06-02 21:57 CST | `0.1.75` handles `Extension context invalidated` and points users to popup wake-up | Needs extension reload and Chrome review to confirm stale panels stop misleading QA. |
 
 ## Timeline
+
+### 2026-06-04
+
+- Local `0.1.91` word-highlight audio sync recovery:
+  - removed the built-in subtitle display lead and extra word lead from the word-highlight clock, so the highlighted word follows the audio clock plus user calibration only
+  - changed fallback word timing to span the full cue duration instead of compressing all words into a maximum 3.6-second window
+  - keeps the existing manual global sync and word-only calibration sliders for later Chrome tuning
+  - pending extension reload and Chrome review
 
 ### 2026-06-03
 

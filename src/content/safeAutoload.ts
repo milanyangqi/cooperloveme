@@ -125,15 +125,14 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.90";
+const SCRIPT_VERSION = "0.1.91";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 350;
-const WORD_HIGHLIGHT_EXTRA_LEAD_MS = 220;
+const DEFAULT_WORD_HIGHLIGHT_OFFSET_MS = 0;
 const MIN_OVERLAY_DURATION_MS = 3200;
-const MIN_WORD_HIGHLIGHT_DURATION_MS = 520;
-const MAX_WORD_HIGHLIGHT_DURATION_MS = 3600;
+const MIN_ESTIMATED_WORD_DURATION_MS = 150;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
@@ -436,9 +435,7 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
   const words = Array.from(cue.text.matchAll(pattern));
   if (!words.length) return escapeHtml(cue.text);
   const video = getMainVideo();
-  const currentMs = video
-    ? (video.currentTime * 1000) + DEFAULT_DISPLAY_LEAD_MS + WORD_HIGHLIGHT_EXTRA_LEAD_MS + settings.syncOffsetMs + settings.wordHighlightOffsetMs
-    : cue.startMs;
+  const currentMs = video ? wordHighlightCurrentMs(video, settings) : cue.startMs;
   const activeWordIndex = activeWordIndexForCue(cue, words, currentMs);
   let output = "";
   let lastIndex = 0;
@@ -453,6 +450,10 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
   return output;
 }
 
+function wordHighlightCurrentMs(video: HTMLVideoElement, settings: SafeSettings) {
+  return (video.currentTime * 1000) + settings.syncOffsetMs + settings.wordHighlightOffsetMs + DEFAULT_WORD_HIGHLIGHT_OFFSET_MS;
+}
+
 function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs: number) {
   const timingIndex = activeWordIndexFromTimings(cue, words.length, currentMs);
   if (timingIndex !== undefined) return timingIndex;
@@ -464,12 +465,9 @@ function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs
     return wordHighlightWeight(match[0], cue.text.slice(end, nextStart));
   });
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || words.length || 1;
-  const estimatedWordMs = cue.durationMs / Math.max(1, words.length);
-  const weightedDurationMs = totalWeight * Math.min(225, Math.max(115, estimatedWordMs));
-  const highlightDurationMs = Math.min(
-    MAX_WORD_HIGHLIGHT_DURATION_MS,
-    Math.max(MIN_WORD_HIGHLIGHT_DURATION_MS, Math.min(cue.durationMs, weightedDurationMs))
-  );
+  const cueDurationMs = cue.durationMs > 0 ? cue.durationMs : words.length * 260;
+  const minimumReadableDurationMs = words.length * MIN_ESTIMATED_WORD_DURATION_MS;
+  const highlightDurationMs = Math.max(1, Math.max(cueDurationMs, minimumReadableDurationMs));
   const targetWeight = Math.min(totalWeight - 0.001, Math.max(0, (elapsedMs / highlightDurationMs) * totalWeight));
   let cursor = 0;
   for (let index = 0; index < weights.length; index += 1) {

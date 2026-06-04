@@ -125,11 +125,11 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.92";
+const SCRIPT_VERSION = "0.1.93";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
-const DEFAULT_DISPLAY_LEAD_MS = 350;
+const DEFAULT_DISPLAY_LEAD_MS = 250;
 const DEFAULT_WORD_HIGHLIGHT_OFFSET_MS = 0;
 const MIN_OVERLAY_DURATION_MS = 3200;
 const MIN_ESTIMATED_WORD_DURATION_MS = 150;
@@ -686,7 +686,7 @@ function installStyle() {
       top: 76px;
       z-index: 2147483647;
       width: 370px;
-      height: clamp(420px, calc(100dvh - 104px), 680px);
+      height: clamp(520px, calc(100dvh - 72px), 860px);
       overflow: hidden;
       background: #202224;
       color: #f7f8f8;
@@ -2281,7 +2281,7 @@ function renderRows(rows: LabCue[]) {
 
   const settings = loadSafeSettings();
   list.classList.toggle("hide-translations", !settings.showTranslations || settings.subtitleMode === "source");
-  const sorted = [...rows].sort((a, b) => b.startMs - a.startMs);
+  const sorted = [...rows].sort((a, b) => a.startMs - b.startMs);
   runtime.__yllSafeSuppressListScrollUntil = Date.now() + 800;
   runtime.__yllSafeLastManualListScrollAt = 0;
   list.innerHTML = sorted
@@ -2362,7 +2362,7 @@ function updateActiveCue() {
     if (userIsReadingElsewhere && activeIsVisible) return;
     const rowTop = activeRow.offsetTop;
     const rowCenter = rowTop + activeRow.offsetHeight / 2;
-    const targetTop = Math.max(0, rowCenter - list.clientHeight * 0.68);
+    const targetTop = Math.max(0, rowCenter - list.clientHeight * 0.78);
     if (Math.abs(list.scrollTop - targetTop) > 12) {
       runtime.__yllSafeSuppressListScrollUntil = Date.now() + 450;
       list.scrollTo({ top: targetTop, behavior: "auto" });

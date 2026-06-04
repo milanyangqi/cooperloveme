@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-04 12:34:34 CST
+Last updated: 2026-06-04 12:57:01 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -22,9 +22,9 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
-| Right-side newest-on-top / upward scroll behavior | Done | 2026-06-03 13:47 CST | `0.1.82` Chrome QA showed the active row visible around the middle of the panel after official subtitles loaded | Keep monitoring on long videos and fallback videos. |
+| Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-04 12:57 CST | `0.1.93` renders rows in chronological order and scrolls the active row into the lower part of the taller panel so playback moves upward | Needs extension reload and Chrome review on long videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
-| Bilingual overlay on video | In Review | 2026-06-04 12:15 CST | `0.1.91` decouples word highlight timing from the subtitle display lead and stretches fallback word progression across the full cue duration | Needs extension reload and Chrome visual timing review. |
+| Bilingual overlay on video | In Review | 2026-06-04 12:57 CST | `0.1.93` keeps word highlighting on the audio clock and lowers the default subtitle display lead from 350ms to 250ms | Needs extension reload and Chrome visual timing review. |
 | Free translation fallback | In Review | 2026-06-03 18:42 CST | `0.1.90` adds capped automatic retranslation when rows exist but translations are missing | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | Partial | 2026-06-02 | Word spans and popover implemented | Needs broader UX review and vocabulary save flow. |
 | Subtitle settings panel | In Review | 2026-06-03 14:10 CST | `0.1.83` adds a right-panel subtitle-mode selector and logs mode changes for diagnostics | Needs extension reload and Chrome review. |
@@ -56,6 +56,12 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - official caption loading now uses two automatic attempts before fallback: a fast pass for already available tracks and a slower pass that allows player/transcript paths to settle
   - slow official paths run only on the second pass or explicit force/retry so normal polling stays light
   - debug logs now include the timeout used for each official attempt
+  - pending extension reload and Chrome review
+
+- Local `0.1.93` caption sync and right-panel scroll recovery:
+  - reduced the built-in subtitle display lead from 350ms to 250ms while keeping word highlight on the audio clock
+  - changed the right-side caption list back to chronological rendering so playback scrolls old lines upward and brings the active line in from lower in the panel
+  - increased the right-side panel height ceiling from 680px to 860px, with a taller viewport-relative layout
   - pending extension reload and Chrome review
 
 ### 2026-06-03

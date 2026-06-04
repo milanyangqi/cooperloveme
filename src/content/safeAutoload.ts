@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.93";
+const SCRIPT_VERSION = "0.1.96";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -778,7 +778,7 @@ function installStyle() {
     }
     #${LIST_ID} .yll-row {
       display: grid;
-      grid-template-columns: 52px 1fr;
+      grid-template-columns: 52px minmax(0, 1fr) 58px;
       gap: 8px;
       width: 100%;
       border: 0;
@@ -809,6 +809,29 @@ function installStyle() {
       overflow-wrap: anywhere;
     }
     #${LIST_ID}.hide-translations .yll-translation { display: none; }
+    #${LIST_ID} .yll-row-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: stretch;
+    }
+    #${LIST_ID} .yll-row-action {
+      min-height: 26px;
+      padding: 0 6px;
+      color: #f7f8f8;
+      background: #2d3034;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    #${LIST_ID} .yll-row-action:hover,
+    #${LIST_ID} .yll-row-action:focus {
+      color: #111;
+      background: #ffc857;
+      outline: none;
+    }
     #${LIST_ID} .yll-word {
       border-radius: 3px;
       cursor: help;
@@ -836,6 +859,23 @@ function installStyle() {
     }
     #${WORD_POPOVER_ID} strong { display: block; margin-bottom: 4px; color: #ffc857; }
     #${WORD_POPOVER_ID} p { margin: 0; color: #d7dbe1; }
+    #${WORD_POPOVER_ID} .yll-insight-block {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,.12);
+    }
+    #${WORD_POPOVER_ID} .yll-insight-title {
+      margin-bottom: 4px;
+      color: #ffc857;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    #${WORD_POPOVER_ID} .yll-insight-list {
+      margin: 0;
+      padding-left: 16px;
+      color: #d7dbe1;
+    }
+    #${WORD_POPOVER_ID} .yll-insight-list li { margin: 3px 0; }
     #${WORD_POPOVER_ID} button {
       margin-top: 10px;
       height: 30px;
@@ -1707,6 +1747,71 @@ function showWordPopover(word: string, message: string, options: { canSave?: boo
   });
 }
 
+function showSentenceInsight(cue: LabCue) {
+  const popover = mountWordPopover();
+  popover.hidden = false;
+  const insight = buildSentenceInsight(cue);
+  popover.innerHTML = `
+    <strong>句子讲解</strong>
+    <p>${escapeHtml(cue.text)}</p>
+    ${cue.translatedText ? `<div class="yll-insight-block"><div class="yll-insight-title">译文</div><p>${escapeHtml(cue.translatedText)}</p></div>` : ""}
+    <div class="yll-insight-block">
+      <div class="yll-insight-title">结构</div>
+      <p>${escapeHtml(insight.structure)}</p>
+    </div>
+    <div class="yll-insight-block">
+      <div class="yll-insight-title">重点词</div>
+      ${insight.keywords.length
+        ? `<ul class="yll-insight-list">${insight.keywords.map((word) => `<li>${escapeHtml(word)}</li>`).join("")}</ul>`
+        : `<p>这句以常用词为主，适合做跟读节奏练习。</p>`}
+    </div>
+    <div class="yll-insight-block">
+      <div class="yll-insight-title">跟读提示</div>
+      <p>${escapeHtml(insight.shadowingTip)}</p>
+    </div>
+  `;
+}
+
+function buildSentenceInsight(cue: LabCue) {
+  const text = cleanText(cue.text);
+  const words = normalizedWords(text);
+  const keywords = sentenceKeywords(words);
+  const structureParts: string[] = [];
+  if (/\?$/.test(text)) structureParts.push("疑问句，注意句尾语调和问题核心。");
+  if (/\b(because|since|as)\b/i.test(text)) structureParts.push("包含原因关系，可以先找 because/since/as 后面的原因。");
+  if (/\b(but|however|although|though)\b/i.test(text)) structureParts.push("包含转折关系，转折后的内容通常是重点。");
+  if (/\b(if|when|while|after|before)\b/i.test(text)) structureParts.push("包含时间或条件从句，可以按从句和主句分块理解。");
+  if (/\b(to|for)\b/i.test(text) && words.length >= 8) structureParts.push("可能包含目的或补充说明，朗读时可在短语前后微停顿。");
+  if (!structureParts.length) {
+    structureParts.push(words.length > 12 ? "较长陈述句，建议按意群分两到三段理解。" : "短句，先抓主语、动作和关键词。");
+  }
+  const durationSeconds = Math.max(0.8, cue.durationMs / 1000);
+  const rate = words.length / durationSeconds;
+  const shadowingTip = rate > 3.2
+    ? "语速偏快，先慢速跟读，再回到原速。"
+    : rate < 1.8
+      ? "语速较稳，适合模仿重音和停顿。"
+      : "语速适中，跟读时重点保持连读和自然停顿。";
+  return {
+    structure: structureParts.join(" "),
+    keywords,
+    shadowingTip
+  };
+}
+
+function sentenceKeywords(words: string[]) {
+  const stopWords = new Set([
+    "a", "an", "the", "to", "of", "in", "on", "at", "and", "or", "but", "is", "are", "was", "were", "be", "been", "being",
+    "do", "does", "did", "it", "this", "that", "these", "those", "we", "you", "i", "he", "she", "they", "my", "our", "your",
+    "for", "with", "as", "by", "from", "so", "if", "when", "what", "why", "how", "about", "into", "out", "up", "down"
+  ]);
+  return Array.from(new Set(words
+    .map((word) => word.toLowerCase())
+    .filter((word) => word.length > 3 && !stopWords.has(word))))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 6);
+}
+
 function toggleSettingsPanel() {
   const existing = document.getElementById(SETTINGS_PANEL_ID);
   if (existing) {
@@ -2295,6 +2400,11 @@ function renderRows(rows: LabCue[]) {
             <span class="yll-text">${renderClickableText(cue.text)}</span>
             ${cue.translatedText ? `<span class="yll-translation">${escapeHtml(cue.translatedText)}</span>` : ""}
           </span>
+          <span class="yll-row-actions" aria-label="句子操作">
+            <button class="yll-row-action" type="button" data-row-action="practice">练习</button>
+            <button class="yll-row-action" type="button" data-row-action="save">收藏</button>
+            <button class="yll-row-action" type="button" data-row-action="explain">讲解</button>
+          </span>
         </div>
       `;
     })
@@ -2309,6 +2419,30 @@ function renderRows(rows: LabCue[]) {
     };
     button.addEventListener("click", (event) => {
       const target = event.target as HTMLElement | null;
+      const rowAction = target?.closest<HTMLButtonElement>("[data-row-action]");
+      if (rowAction) {
+        event.preventDefault();
+        event.stopPropagation();
+        const rowCue = sorted.find((cue) => cueKey(cue) === button.dataset.key);
+        if (!rowCue) return;
+        if (rowAction.dataset.rowAction === "practice") {
+          openPracticeOverlay([rowCue], 0);
+          return;
+        }
+        if (rowAction.dataset.rowAction === "save") {
+          rowAction.disabled = true;
+          rowAction.textContent = "保存中";
+          void saveSentenceNote(rowCue).then((saved) => {
+            rowAction.textContent = saved ? "已收藏" : "失败";
+            rowAction.disabled = false;
+          });
+          return;
+        }
+        if (rowAction.dataset.rowAction === "explain") {
+          showSentenceInsight(rowCue);
+          return;
+        }
+      }
       const wordElement = target?.closest<HTMLElement>(".yll-word");
       if (wordElement?.dataset.word) {
         event.preventDefault();
@@ -3685,6 +3819,17 @@ function readTextTrackRows() {
     .filter(Boolean) as LabCue[];
 }
 
+function isLikelyCompleteTextTrackRows(rows: LabCue[]) {
+  if (rows.length < 8) return false;
+  const video = getMainVideo();
+  const durationMs = video?.duration && Number.isFinite(video.duration) ? video.duration * 1000 : 0;
+  if (!durationMs || durationMs < 90000) return rows.length >= 8;
+  const lastEndMs = rows.reduce((max, cue) => Math.max(max, cue.startMs + cue.durationMs), 0);
+  const coverageRatio = lastEndMs / durationMs;
+  const enoughRowsForLongVideo = rows.length >= Math.min(80, Math.max(18, Math.floor(durationMs / 45000)));
+  return coverageRatio >= 0.55 && enoughRowsForLongVideo;
+}
+
 function readVisibleCaptionCue(allowHiddenCaptions = false) {
   const isVisible = (element: HTMLElement) => {
     if (allowHiddenCaptions) return element.getBoundingClientRect().width > 0 || Boolean(element.textContent?.trim());
@@ -3830,13 +3975,20 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
     try {
       const textTrackRows = readTextTrackRows();
       if (textTrackRows.length) {
-        saveRows(textTrackRows, "video.textTracks");
-        runtime.__yllSafeIsLoadingOfficial = false;
-        runtime.__yllSafeLoadingVideoId = undefined;
-        lockOfficialRowsForCurrentVideo(videoId);
-        runtime.__yllSafeLastOfficialDebug = [`success:video.textTracks:${textTrackRows.length}`];
-        addDebugLog("load:text-track-success", { rows: textTrackRows.length });
-        return;
+        if (isLikelyCompleteTextTrackRows(textTrackRows)) {
+          saveRows(textTrackRows, "video.textTracks");
+          runtime.__yllSafeIsLoadingOfficial = false;
+          runtime.__yllSafeLoadingVideoId = undefined;
+          lockOfficialRowsForCurrentVideo(videoId);
+          runtime.__yllSafeLastOfficialDebug = [`success:video.textTracks:${textTrackRows.length}`];
+          addDebugLog("load:text-track-success", { rows: textTrackRows.length });
+          return;
+        }
+        runtime.__yllSafeLastOfficialDebug?.push(`textTracks partial:${textTrackRows.length}`);
+        addDebugLog("load:text-track-partial", {
+          rows: textTrackRows.length,
+          lastStartMs: textTrackRows[textTrackRows.length - 1]?.startMs
+        });
       }
     } catch (error) {
       runtime.__yllSafeLastFailure = `textTracks: ${toErrorMessage(error)}`;

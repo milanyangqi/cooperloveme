@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.96";
+const SCRIPT_VERSION = "0.1.103";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -178,6 +178,7 @@ const runtime = window as typeof window & {
   __yllSafeTimer?: number;
   __yllSafeOverlayTimer?: number;
   __yllSafeOfficialRetryTimer?: number;
+  __yllSafeStartupRetryTimers?: number[];
   __yllSafeLastHref?: string;
   __yllSafeLastVideoId?: string;
   __yllSafeRows?: LabCue[];
@@ -206,6 +207,8 @@ const runtime = window as typeof window & {
   __yllSafeDebugSnapshot?: () => unknown;
   __yllSafeLastManualListScrollAt?: number;
   __yllSafeSuppressListScrollUntil?: number;
+  __yllSafeExpandedInsightKey?: string;
+  __yllSafeWasAdShowing?: boolean;
   __yllTimedTextBridgeListening?: boolean;
   __yllTimedTextBridgeInstalled?: boolean;
   __yllCapturedTimedText?: CapturedTimedText[];
@@ -254,6 +257,7 @@ function stopCurrentScriptInstance() {
   runtime.__yllSafeOfficialLockedVideoId = undefined;
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeCanUseVisibleFallback = false;
+  runtime.__yllSafeExpandedInsightKey = undefined;
   document.getElementById(PANEL_ID)?.remove();
   document.getElementById(OVERLAY_ID)?.remove();
   document.getElementById(WORD_POPOVER_ID)?.remove();
@@ -778,7 +782,7 @@ function installStyle() {
     }
     #${LIST_ID} .yll-row {
       display: grid;
-      grid-template-columns: 52px minmax(0, 1fr) 58px;
+      grid-template-columns: 52px minmax(0, 1fr);
       gap: 8px;
       width: 100%;
       border: 0;
@@ -797,6 +801,7 @@ function installStyle() {
       white-space: nowrap;
     }
     #${LIST_ID} .yll-text {
+      display: block;
       white-space: normal;
       overflow-wrap: anywhere;
       font-weight: 650;
@@ -810,14 +815,20 @@ function installStyle() {
     }
     #${LIST_ID}.hide-translations .yll-translation { display: none; }
     #${LIST_ID} .yll-row-actions {
-      display: flex;
-      flex-direction: column;
+      display: none;
+      flex-direction: row;
+      flex-wrap: wrap;
       gap: 6px;
-      align-items: stretch;
+      align-items: center;
+      margin-top: 7px;
+    }
+    #${LIST_ID} .yll-row:hover .yll-row-actions,
+    #${LIST_ID} .yll-row:focus-within .yll-row-actions {
+      display: flex;
     }
     #${LIST_ID} .yll-row-action {
-      min-height: 26px;
-      padding: 0 6px;
+      min-height: 24px;
+      padding: 0 9px;
       color: #f7f8f8;
       background: #2d3034;
       border: 1px solid rgba(255,255,255,.14);
@@ -832,6 +843,29 @@ function installStyle() {
       background: #ffc857;
       outline: none;
     }
+    #${LIST_ID} .yll-row-insight {
+      grid-column: 2 / 3;
+      margin-top: 8px;
+      padding: 10px;
+      color: #d7dbe1;
+      background: rgba(0,0,0,.24);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 7px;
+      font-size: 12px;
+      line-height: 1.48;
+    }
+    #${LIST_ID} .yll-row-insight strong {
+      display: block;
+      margin: 8px 0 3px;
+      color: #ffc857;
+      font-size: 12px;
+    }
+    #${LIST_ID} .yll-row-insight strong:first-child { margin-top: 0; }
+    #${LIST_ID} .yll-row-insight ul {
+      margin: 0;
+      padding-left: 16px;
+    }
+    #${LIST_ID} .yll-row-insight li { margin: 2px 0; }
     #${LIST_ID} .yll-word {
       border-radius: 3px;
       cursor: help;
@@ -1380,6 +1414,7 @@ function debugSnapshot() {
   return {
     version: SCRIPT_VERSION,
     videoId: getVideoId(),
+    adShowing: isYouTubeAdShowing(),
     rows: rows.length,
     sources: Array.from(new Set(rows.map((cue) => cue.source))),
     loadingVideoId: runtime.__yllSafeLoadingVideoId,
@@ -1750,25 +1785,42 @@ function showWordPopover(word: string, message: string, options: { canSave?: boo
 function showSentenceInsight(cue: LabCue) {
   const popover = mountWordPopover();
   popover.hidden = false;
-  const insight = buildSentenceInsight(cue);
   popover.innerHTML = `
     <strong>句子讲解</strong>
     <p>${escapeHtml(cue.text)}</p>
-    ${cue.translatedText ? `<div class="yll-insight-block"><div class="yll-insight-title">译文</div><p>${escapeHtml(cue.translatedText)}</p></div>` : ""}
-    <div class="yll-insight-block">
-      <div class="yll-insight-title">结构</div>
-      <p>${escapeHtml(insight.structure)}</p>
-    </div>
-    <div class="yll-insight-block">
-      <div class="yll-insight-title">重点词</div>
-      ${insight.keywords.length
-        ? `<ul class="yll-insight-list">${insight.keywords.map((word) => `<li>${escapeHtml(word)}</li>`).join("")}</ul>`
-        : `<p>这句以常用词为主，适合做跟读节奏练习。</p>`}
-    </div>
-    <div class="yll-insight-block">
-      <div class="yll-insight-title">跟读提示</div>
-      <p>${escapeHtml(insight.shadowingTip)}</p>
-    </div>
+    ${renderSentenceInsightHtml(cue, "popover")}
+  `;
+}
+
+function renderSentenceInsightHtml(cue: LabCue, variant: "popover" | "row" = "row") {
+  const insight = buildSentenceInsight(cue);
+  if (variant === "popover") {
+    return `
+      ${cue.translatedText ? `<div class="yll-insight-block"><div class="yll-insight-title">译文</div><p>${escapeHtml(cue.translatedText)}</p></div>` : ""}
+      <div class="yll-insight-block">
+        <div class="yll-insight-title">结构</div>
+        <p>${escapeHtml(insight.structure)}</p>
+      </div>
+      <div class="yll-insight-block">
+        <div class="yll-insight-title">重点词</div>
+        ${insight.keywords.length
+          ? `<ul class="yll-insight-list">${insight.keywords.map((word) => `<li>${escapeHtml(word)}</li>`).join("")}</ul>`
+          : `<p>这句以常用词为主，适合做跟读节奏练习。</p>`}
+      </div>
+      <div class="yll-insight-block">
+        <div class="yll-insight-title">跟读提示</div>
+        <p>${escapeHtml(insight.shadowingTip)}</p>
+      </div>
+    `;
+  }
+  return `
+    ${cue.translatedText ? `<strong>译文</strong><div>${escapeHtml(cue.translatedText)}</div>` : ""}
+    <strong>结构</strong><div>${escapeHtml(insight.structure)}</div>
+    <strong>重点词</strong>
+    ${insight.keywords.length
+      ? `<ul>${insight.keywords.map((word) => `<li>${escapeHtml(word)}</li>`).join("")}</ul>`
+      : `<div>这句以常用词为主，适合做跟读节奏练习。</div>`}
+    <strong>跟读提示</strong><div>${escapeHtml(insight.shadowingTip)}</div>
   `;
 }
 
@@ -2393,18 +2445,20 @@ function renderRows(rows: LabCue[]) {
     .map((cue) => {
       const key = cueKey(cue);
       const activeClass = key === runtime.__yllSafeActiveKey ? " is-active" : "";
+      const expanded = key === runtime.__yllSafeExpandedInsightKey;
       return `
         <div class="yll-row${activeClass}" role="button" tabindex="0" data-start="${cue.startMs}" data-key="${escapeHtml(key)}">
           <span class="yll-time">${formatClock(cue.startMs)}</span>
           <span>
             <span class="yll-text">${renderClickableText(cue.text)}</span>
             ${cue.translatedText ? `<span class="yll-translation">${escapeHtml(cue.translatedText)}</span>` : ""}
+            <span class="yll-row-actions" aria-label="句子操作">
+              <button class="yll-row-action" type="button" data-row-action="practice">练习</button>
+              <button class="yll-row-action" type="button" data-row-action="save">收藏</button>
+              <button class="yll-row-action" type="button" data-row-action="explain">${expanded ? "收起" : "讲解"}</button>
+            </span>
           </span>
-          <span class="yll-row-actions" aria-label="句子操作">
-            <button class="yll-row-action" type="button" data-row-action="practice">练习</button>
-            <button class="yll-row-action" type="button" data-row-action="save">收藏</button>
-            <button class="yll-row-action" type="button" data-row-action="explain">讲解</button>
-          </span>
+          ${expanded ? `<div class="yll-row-insight">${renderSentenceInsightHtml(cue, "row")}</div>` : ""}
         </div>
       `;
     })
@@ -2439,7 +2493,10 @@ function renderRows(rows: LabCue[]) {
           return;
         }
         if (rowAction.dataset.rowAction === "explain") {
-          showSentenceInsight(rowCue);
+          const rowKey = cueKey(rowCue);
+          runtime.__yllSafeExpandedInsightKey = runtime.__yllSafeExpandedInsightKey === rowKey ? undefined : rowKey;
+          document.getElementById(WORD_POPOVER_ID)?.setAttribute("hidden", "");
+          renderRows(runtime.__yllSafeRows ?? []);
           return;
         }
       }
@@ -2465,6 +2522,10 @@ function updateActiveCue() {
   const video = getMainVideo();
   const list = document.getElementById(LIST_ID);
   if (!rows.length || !video || !list) return;
+  if (isYouTubeAdShowing()) {
+    setOverlayCue(undefined);
+    return;
+  }
 
   const settings = loadSafeSettings();
   const active = selectActiveCue(rows, syncedCurrentMs(video, settings));
@@ -2528,6 +2589,10 @@ function refreshOverlayHighlight() {
   const video = getMainVideo();
   const overlay = document.getElementById(OVERLAY_ID);
   if (!rows.length || !video || !overlay?.classList.contains("is-visible")) return;
+  if (isYouTubeAdShowing()) {
+    setOverlayCue(undefined);
+    return;
+  }
 
   const settings = loadSafeSettings();
   if (!settings.highlightCurrentWord) return;
@@ -2548,12 +2613,18 @@ function clearScheduledOfficialRetry() {
   runtime.__yllSafeOfficialRetryTimer = undefined;
 }
 
+function clearStartupOfficialRetries() {
+  (runtime.__yllSafeStartupRetryTimers ?? []).forEach((timer) => window.clearTimeout(timer));
+  runtime.__yllSafeStartupRetryTimers = [];
+}
+
 function lockOfficialRowsForCurrentVideo(videoId = getVideoId()) {
   if (!videoId) return;
   runtime.__yllSafeLoadedVideoId = videoId;
   runtime.__yllSafeOfficialLockedVideoId = videoId;
   runtime.__yllSafeCanUseVisibleFallback = false;
   clearScheduledOfficialRetry();
+  clearStartupOfficialRetries();
 }
 
 function scheduleOfficialRetry(delayMs: number, reason: string) {
@@ -2562,6 +2633,11 @@ function scheduleOfficialRetry(delayMs: number, reason: string) {
   clearScheduledOfficialRetry();
   runtime.__yllSafeOfficialRetryTimer = window.setTimeout(() => {
     runtime.__yllSafeOfficialRetryTimer = undefined;
+    if (isYouTubeAdShowing()) {
+      addDebugLog("load:scheduled-retry-skip-ad", { reason, videoId });
+      scheduleOfficialRetry(2500, reason);
+      return;
+    }
     addDebugLog("load:scheduled-retry-run", { reason, videoId });
     void loadRowsForCurrentVideo({ force: true, reason }).catch((error) => {
       runtime.__yllSafeIsLoadingOfficial = false;
@@ -2571,6 +2647,28 @@ function scheduleOfficialRetry(delayMs: number, reason: string) {
     });
   }, delayMs);
   addDebugLog("load:scheduled-retry", { delayMs, reason, videoId });
+}
+
+function scheduleStartupOfficialRetries(videoId: string) {
+  clearStartupOfficialRetries();
+  runtime.__yllSafeStartupRetryTimers = [1800, 5200, 11000].map((delayMs) =>
+    window.setTimeout(() => {
+      if (getVideoId() !== videoId || hasOfficialRows()) return;
+      if (isYouTubeAdShowing()) {
+        addDebugLog("load:startup-retry-skip-ad", { videoId, delayMs });
+        scheduleOfficialRetry(2500, `startup-after-ad-${delayMs}`);
+        return;
+      }
+      addDebugLog("load:startup-retry-run", { videoId, delayMs });
+      void loadRowsForCurrentVideo({ force: true, reason: `startup-stabilized-${delayMs}` }).catch((error) => {
+        runtime.__yllSafeIsLoadingOfficial = false;
+        runtime.__yllSafeLoadingVideoId = undefined;
+        runtime.__yllSafeLastFailure = `startup retry: ${toErrorMessage(error)}`;
+        addDebugLog("load:startup-retry-error", { delayMs, error: toErrorMessage(error) });
+      });
+    }, delayMs)
+  );
+  addDebugLog("load:startup-retry-scheduled", { videoId, delays: [1800, 5200, 11000] });
 }
 
 function saveRows(rows: LabCue[], sourceLabel: string) {
@@ -2831,6 +2929,28 @@ function getMoviePlayer() {
         getOption?: (section: string, key: string) => unknown;
       })
     | null;
+}
+
+function elementLooksVisible(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+}
+
+function isYouTubeAdShowing() {
+  const player = getMoviePlayer();
+  if (player?.classList.contains("ad-showing") || player?.classList.contains("ad-interrupting")) return true;
+  const adSelectors = [
+    ".ytp-ad-player-overlay",
+    ".ytp-ad-preview-container",
+    ".ytp-ad-skip-button",
+    ".ytp-ad-skip-button-modern",
+    ".ytp-ad-text",
+    ".video-ads .ytp-ad-module"
+  ];
+  return adSelectors.some((selector) =>
+    Array.from(document.querySelectorAll<HTMLElement>(selector)).some(elementLooksVisible)
+  );
 }
 
 async function loadRowsViaPlayerRequest(videoId: string, tracks: RawCaptionTrack[]) {
@@ -3897,6 +4017,14 @@ function ensureNativeCaptionsForFallback() {
 async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: string } = {}) {
   const videoId = getVideoId();
   if (!videoId || runtime.__yllSafeLoadingVideoId === videoId) return;
+  if (isYouTubeAdShowing()) {
+    runtime.__yllSafeIsLoadingOfficial = false;
+    runtime.__yllSafeLoadingVideoId = undefined;
+    addDebugLog("load:skip-ad", { videoId, force: Boolean(options.force), reason: options.reason ?? "poll" });
+    setStatus("广告播放中，暂停字幕读取，广告结束后自动恢复。");
+    scheduleOfficialRetry(2500, "ad-playing");
+    return;
+  }
   const rows = runtime.__yllSafeRows ?? [];
   const hasOfficialRowsForVideo = hasOfficialRows(rows);
   if (!options.force && runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRowsForVideo) return;
@@ -4026,6 +4154,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
 }
 
 function captureVisibleFallback() {
+  if (isYouTubeAdShowing()) return;
   if (!runtime.__yllSafeCanUseVisibleFallback) return;
   if (runtime.__yllSafeOfficialLockedVideoId === getVideoId()) return;
   if (hasOfficialRows()) return;
@@ -4072,6 +4201,7 @@ function tick() {
   try {
     if (!isWatchPage()) {
       clearScheduledOfficialRetry();
+      clearStartupOfficialRetries();
       document.getElementById(PANEL_ID)?.remove();
       document.getElementById(OVERLAY_ID)?.remove();
       document.documentElement.classList.remove("yll-hide-native-captions");
@@ -4094,6 +4224,8 @@ function tick() {
       runtime.__yllSafeOfficialAttemptCount = undefined;
       runtime.__yllSafeLastOfficialDebug = undefined;
       runtime.__yllSafeRowsGeneration = undefined;
+      runtime.__yllSafeExpandedInsightKey = undefined;
+      runtime.__yllSafeWasAdShowing = false;
       document.getElementById(WORD_POPOVER_ID)?.remove();
     document.getElementById(SETTINGS_PANEL_ID)?.remove();
     document.getElementById(DEBUG_PANEL_ID)?.remove();
@@ -4107,6 +4239,8 @@ function tick() {
     const currentVideoId = getVideoId();
     if (runtime.__yllSafeLastVideoId !== currentVideoId) {
       clearScheduledOfficialRetry();
+      clearStartupOfficialRetries();
+      if (currentVideoId) scheduleStartupOfficialRetries(currentVideoId);
       runtime.__yllSafeLastHref = location.href;
       runtime.__yllSafeLastVideoId = currentVideoId;
       runtime.__yllSafeLoadedVideoId = undefined;
@@ -4125,10 +4259,26 @@ function tick() {
       runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
       runtime.__yllSafeLastOfficialDebug = undefined;
+      runtime.__yllSafeExpandedInsightKey = undefined;
+      runtime.__yllSafeWasAdShowing = false;
       document.getElementById(WORD_POPOVER_ID)?.remove();
       document.getElementById(SETTINGS_PANEL_ID)?.remove();
       document.getElementById(PRACTICE_ID)?.remove();
       document.getElementById(LIBRARY_PANEL_ID)?.remove();
+    }
+    if (isYouTubeAdShowing()) {
+      if (!runtime.__yllSafeWasAdShowing) {
+        runtime.__yllSafeWasAdShowing = true;
+        addDebugLog("ad:pause-subtitles", { videoId: currentVideoId, rows: runtime.__yllSafeRows?.length ?? 0 });
+        setStatus("广告播放中，插件字幕已暂停，广告结束后自动恢复。");
+      }
+      setOverlayCue(undefined);
+      return;
+    }
+    if (runtime.__yllSafeWasAdShowing) {
+      runtime.__yllSafeWasAdShowing = false;
+      addDebugLog("ad:resume-subtitles", { videoId: currentVideoId, rows: runtime.__yllSafeRows?.length ?? 0 });
+      setStatus("广告已结束，字幕同步继续。");
     }
     void loadRowsForCurrentVideo().catch((error) => {
       runtime.__yllSafeIsLoadingOfficial = false;
@@ -4171,6 +4321,7 @@ window.addEventListener("yll-safe-reload", () => {
   if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
   runtime.__yllSafeOverlayTimer = undefined;
   clearScheduledOfficialRetry();
+  clearStartupOfficialRetries();
   runtime.__yllSafeLoadedVideoId = undefined;
   runtime.__yllSafeLoadingVideoId = undefined;
   runtime.__yllSafeOfficialLockedVideoId = undefined;
@@ -4188,6 +4339,7 @@ window.addEventListener("yll-safe-reload", () => {
   runtime.__yllSafeLastOfficialAttemptAt = undefined;
   runtime.__yllSafeOfficialAttemptCount = undefined;
   runtime.__yllSafeLastOfficialDebug = undefined;
+  runtime.__yllSafeWasAdShowing = false;
   document.getElementById(WORD_POPOVER_ID)?.remove();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(PRACTICE_ID)?.remove();

@@ -102,17 +102,34 @@ export async function translateCuesWithAi(
 }
 
 async function translateCuesWithWeb(cues: CaptionCue[], targetLanguage: string): Promise<TranslatedCue[]> {
-  const translated = await Promise.all(
-    cues.map(async (cue) => {
+  return mapWithConcurrency(cues, 4, async (cue) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         return await translateCueWithWeb(cue, targetLanguage);
       } catch {
-        return translatedCueFallback(cue, targetLanguage);
+        if (attempt === 0) await delay(180);
       }
-    })
-  );
+    }
+    return translatedCueFallback(cue, targetLanguage);
+  });
+}
 
-  return translated;
+async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item: T, index: number) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }));
+  return results;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function translateCueWithWeb(cue: CaptionCue, targetLanguage: string): Promise<TranslatedCue> {

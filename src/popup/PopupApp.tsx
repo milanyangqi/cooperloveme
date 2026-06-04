@@ -176,8 +176,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.91 待审核</strong>
-          <p>逐词高亮改用音频时钟，避免提前跑完整句。</p>
+          <strong>0.1.92 待审核</strong>
+          <p>官方字幕改为快慢两段读取，减少手动重读。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

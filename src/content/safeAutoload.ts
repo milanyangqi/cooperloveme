@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.91";
+const SCRIPT_VERSION = "0.1.92";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -137,8 +137,9 @@ const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 12000;
-const OFFICIAL_AUTO_ATTEMPTS = 1;
-const OFFICIAL_ATTEMPT_TIMEOUT_MS = 4000;
+const OFFICIAL_AUTO_ATTEMPTS = 2;
+const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 3500;
+const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 8500;
 const USER_SCROLL_PAUSE_MS = 4200;
 
 type SafeSettings = {
@@ -3798,11 +3799,12 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
   for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
     setStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`);
     try {
-      const includeSlowPaths = Boolean(hasVisibleRows && runtime.__yllSafeOfficialAttemptCount % 4 === 0);
-      addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS, includeSlowPaths });
+      const includeSlowPaths = attempt > 0 || Boolean(options.force) || Boolean(hasVisibleRows && runtime.__yllSafeOfficialAttemptCount % 4 === 0);
+      const attemptTimeoutMs = includeSlowPaths ? OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS : OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS;
+      addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS, includeSlowPaths, attemptTimeoutMs });
       const officialRows = await withTimeout(
         loadOfficialRows(videoId, { includeSlowPaths }),
-        OFFICIAL_ATTEMPT_TIMEOUT_MS,
+        attemptTimeoutMs,
         "official auto attempt"
       );
       addDebugLog("load:official-result", { rows: officialRows.length, sources: Array.from(new Set(officialRows.map((row) => row.source))) });

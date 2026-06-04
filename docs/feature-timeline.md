@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-04 12:15:00 CST
+Last updated: 2026-06-04 12:34:34 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-03 16:29 CST | `0.1.88` adds delayed forced official retry, locks successful official rows per video, and resets only on video ID changes | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-04 12:34 CST | `0.1.92` uses a fast official-track pass followed by a slower player/transcript pass before visible-CC fallback | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | Done | 2026-06-02 | Runtime test showed hundreds of complete rows | Rows support click-to-seek and word lookup. |
@@ -50,6 +50,12 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - removed the built-in subtitle display lead and extra word lead from the word-highlight clock, so the highlighted word follows the audio clock plus user calibration only
   - changed fallback word timing to span the full cue duration instead of compressing all words into a maximum 3.6-second window
   - keeps the existing manual global sync and word-only calibration sliders for later Chrome tuning
+  - pending extension reload and Chrome review
+
+- Local `0.1.92` official-caption startup recovery:
+  - official caption loading now uses two automatic attempts before fallback: a fast pass for already available tracks and a slower pass that allows player/transcript paths to settle
+  - slow official paths run only on the second pass or explicit force/retry so normal polling stays light
+  - debug logs now include the timeout used for each official attempt
   - pending extension reload and Chrome review
 
 ### 2026-06-03

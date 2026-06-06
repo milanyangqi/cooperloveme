@@ -176,8 +176,8 @@ export function PopupApp() {
       <section className="account-card">
         <div>
           <span className="label">当前版本</span>
-          <strong>0.1.113 待审核</strong>
-          <p>加快官方字幕首读，并修复逐词高亮跳词。</p>
+          <strong>0.1.115 待审核</strong>
+          <p>扩大 YouTube 注入范围，确保站内进入视频页也能自动弹出。</p>
         </div>
         <span className="plan">
           <ShieldCheck size={13} />

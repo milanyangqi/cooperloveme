@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Language Lab",
   "description": "双语字幕、混合练习、AI 跟读评分和本地词句库，账号与 Pro 权限体系已预留。",
-  "version": "0.1.113",
+  "version": "0.1.115",
   "action": {
     "default_title": "YouTube Language Lab",
     "default_popup": "popup.html"
@@ -16,7 +16,7 @@
   "optional_host_permissions": [],
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/watch*"],
+      "matches": ["https://www.youtube.com/*"],
       "js": ["assets/content.js"],
       "run_at": "document_idle"
     }

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 11:16:02 CST
+Last updated: 2026-06-06 13:51:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -24,9 +24,9 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Right-side caption panel with full sentences | In Review | 2026-06-05 08:27 CST | `0.1.110` changes the header to auto height so toolbar tabs such as `学习库` are not covered by the subtitle list | Needs Chrome review after extension reload. |
 | Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-04 12:57 CST | `0.1.93` renders rows in chronological order and scrolls the active row into the lower part of the taller panel so playback moves upward | Needs extension reload and Chrome review on long videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
-| Bilingual overlay on video | In Review | 2026-06-06 11:16 CST | `0.1.113` makes word highlighting ignore sparse timing maps and use readable-duration pacing when needed | Needs extension reload and spoken-audio review. |
+| Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
 | Free translation fallback | In Review | 2026-06-04 20:28 CST | `0.1.103` limits free web translation concurrency and retries once after transient failures | Needs reload and Chrome review on an official-caption video. |
-| Click word for translation | Partial | 2026-06-04 19:10 CST | Word spans, vocabulary save, and `0.1.97` persistent row-level sentence explanation are implemented | Needs Chrome review and later AI-backed explanation. |
+| Click word for translation | In Review | 2026-06-06 13:51 CST | `0.1.115` enables hover/click lookup on video overlay words and reuses cached or pending free-translation lookups | Needs Chrome hover review. |
 | Subtitle settings panel | In Review | 2026-06-04 23:29 CST | `0.1.107` adds an internal close button and slightly narrows the floating settings panel | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-04 20:46 CST | `0.1.105` makes the practice entry choose the current playback cue when no active row is set | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
@@ -40,7 +40,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
 | Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
-| Stale content-script protection | In Review | 2026-06-02 21:57 CST | `0.1.75` handles `Extension context invalidated` and points users to popup wake-up | Needs extension reload and Chrome review to confirm stale panels stop misleading QA. |
+| Stale content-script protection | In Review | 2026-06-06 13:45 CST | `0.1.115` injects on all `www.youtube.com/*` pages and lets the script self-activate on watch routes, covering YouTube SPA navigation | Needs extension reload and fresh YouTube page review. |
 
 ## Timeline
 
@@ -187,6 +187,22 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - word highlighting now rejects sparse or mismatched JSON3 word timings instead of mapping them directly to rendered words
   - estimated word highlighting now uses the overlay readable duration, so extended subtitle display no longer jumps directly to the final word
   - pending extension reload and Chrome review
+
+- Local `0.1.114` overlay interaction and auto-open recovery:
+  - word highlighting now uses the same synced clock as sentence selection, instead of a separate raw video clock
+  - estimated word progress no longer uses the 3.2s overlay minimum display duration, which was slowing highlights behind speech
+  - video overlay words are now pointer-interactive and support hover/focus/click lookup
+  - word lookup reuses the existing free translation path and caches results for the current page
+  - closing the right panel no longer clears the content-script timers, so opening a new watch page can auto-mount the panel again
+  - added a quality guard for coarse YouTube json3 word timings; low-span timings now fall back to smoother estimated word progress instead of jumping to the final word
+  - added a small default word-highlight lead while keeping sentence timing unchanged
+  - pending extension reload and Chrome review
+
+- Local `0.1.115` YouTube SPA auto-injection recovery:
+  - broadened the content-script match from `https://www.youtube.com/watch*` to `https://www.youtube.com/*`
+  - the script still no-ops outside watch pages, but it can now survive YouTube homepage/search to watch-page SPA navigation and auto-mount without popup wake
+  - word hover lookup now reuses pending per-word translation requests, avoiding repeated calls while the overlay refreshes under the mouse
+  - pending extension reload and fresh YouTube route-change review
 
 ### 2026-06-03
 

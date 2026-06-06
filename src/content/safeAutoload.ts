@@ -125,15 +125,18 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.113";
+const SCRIPT_VERSION = "0.1.115";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 250;
-const DEFAULT_WORD_HIGHLIGHT_OFFSET_MS = 0;
+const DEFAULT_WORD_HIGHLIGHT_OFFSET_MS = 80;
 const MIN_OVERLAY_DURATION_MS = 3200;
-const MIN_ESTIMATED_WORD_DURATION_MS = 210;
+const MIN_ESTIMATED_WORD_DURATION_MS = 140;
+const MIN_WORD_HIGHLIGHT_DURATION_MS = 850;
+const MAX_ESTIMATED_WORD_DURATION_MS = 2400;
 const MIN_TIMED_WORD_COVERAGE_RATIO = 0.82;
+const MIN_TIMED_WORD_SPAN_RATIO = 0.45;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
@@ -212,6 +215,9 @@ const runtime = window as typeof window & {
   __yllSafeWasAdShowing?: boolean;
   __yllSafeLibraryOpen?: boolean;
   __yllSafeLastLibraryToggleAt?: number;
+  __yllSafePanelDismissedVideoId?: string;
+  __yllSafeWordLookupCache?: Map<string, string>;
+  __yllSafeWordLookupPending?: Map<string, Promise<string | undefined>>;
   __yllTimedTextBridgeListening?: boolean;
   __yllTimedTextBridgeInstalled?: boolean;
   __yllCapturedTimedText?: CapturedTimedText[];
@@ -452,7 +458,7 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
     const word = match[0];
     const start = match.index ?? 0;
     output += escapeHtml(cue.text.slice(lastIndex, start));
-    output += `<span class="yll-overlay-word ${index === activeWordIndex ? "is-current" : ""}">${escapeHtml(word)}</span>`;
+    output += `<span class="yll-overlay-word ${index === activeWordIndex ? "is-current" : ""}" role="button" tabindex="0" data-word="${escapeHtml(word)}" data-start="${cue.startMs}">${escapeHtml(word)}</span>`;
     lastIndex = start + word.length;
   });
   output += escapeHtml(cue.text.slice(lastIndex));
@@ -460,7 +466,7 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
 }
 
 function wordHighlightCurrentMs(video: HTMLVideoElement, settings: SafeSettings) {
-  return (video.currentTime * 1000) + settings.syncOffsetMs + settings.wordHighlightOffsetMs + DEFAULT_WORD_HIGHLIGHT_OFFSET_MS;
+  return syncedCurrentMs(video, settings) + settings.wordHighlightOffsetMs + DEFAULT_WORD_HIGHLIGHT_OFFSET_MS;
 }
 
 function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs: number) {
@@ -475,8 +481,11 @@ function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs
   });
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || words.length || 1;
   const cueDurationMs = cue.durationMs > 0 ? cue.durationMs : words.length * 260;
-  const minimumReadableDurationMs = words.length * MIN_ESTIMATED_WORD_DURATION_MS;
-  const highlightDurationMs = Math.max(1, Math.max(cueDurationMs, MIN_OVERLAY_DURATION_MS, minimumReadableDurationMs));
+  const minimumReadableDurationMs = Math.min(
+    MAX_ESTIMATED_WORD_DURATION_MS,
+    Math.max(MIN_WORD_HIGHLIGHT_DURATION_MS, words.length * MIN_ESTIMATED_WORD_DURATION_MS)
+  );
+  const highlightDurationMs = Math.max(1, Math.max(cueDurationMs, minimumReadableDurationMs));
   const targetWeight = Math.min(totalWeight - 0.001, Math.max(0, (elapsedMs / highlightDurationMs) * totalWeight));
   let cursor = 0;
   for (let index = 0; index < weights.length; index += 1) {
@@ -491,6 +500,11 @@ function activeWordIndexFromTimings(cue: LabCue, wordCountValue: number, current
   if (!timings.length) return undefined;
   const coverageRatio = Math.min(timings.length, wordCountValue) / Math.max(timings.length, wordCountValue, 1);
   if (coverageRatio < MIN_TIMED_WORD_COVERAGE_RATIO) return undefined;
+  const timedStartMs = timings[0]?.startMs ?? cue.startMs;
+  const timedEndMs = timings[timings.length - 1]?.endMs ?? timedStartMs;
+  const cueReadableDurationMs = Math.max(cue.durationMs, Math.min(MAX_ESTIMATED_WORD_DURATION_MS, Math.max(MIN_WORD_HIGHLIGHT_DURATION_MS, wordCountValue * MIN_ESTIMATED_WORD_DURATION_MS)));
+  const timedSpanRatio = (timedEndMs - timedStartMs) / Math.max(cueReadableDurationMs, 1);
+  if (timings.length > 2 && timedSpanRatio < MIN_TIMED_WORD_SPAN_RATIO) return undefined;
 
   const normalizedCurrentMs = Math.max(cue.startMs, currentMs);
   const activeIndex = timings.findIndex((timing, index) => {
@@ -498,7 +512,7 @@ function activeWordIndexFromTimings(cue: LabCue, wordCountValue: number, current
     return normalizedCurrentMs >= timing.startMs - 80 && normalizedCurrentMs < Math.max(timing.endMs, nextStart);
   });
   if (activeIndex >= 0) return mapTimingIndexToWordIndex(activeIndex, timings.length, wordCountValue);
-  const readableEndMs = cue.startMs + Math.max(cue.durationMs, MIN_OVERLAY_DURATION_MS, wordCountValue * MIN_ESTIMATED_WORD_DURATION_MS);
+  const readableEndMs = cue.startMs + cueReadableDurationMs;
   if (normalizedCurrentMs < readableEndMs) return undefined;
   for (let index = timings.length - 1; index >= 0; index -= 1) {
     if (timings[index].startMs <= normalizedCurrentMs) return mapTimingIndexToWordIndex(index, timings.length, wordCountValue);
@@ -1326,6 +1340,15 @@ function installStyle() {
     #${OVERLAY_ID} .yll-overlay-word {
       border-radius: 4px;
       padding: 0 2px;
+      pointer-events: auto;
+      cursor: help;
+    }
+    #${OVERLAY_ID} .yll-overlay-word:hover,
+    #${OVERLAY_ID} .yll-overlay-word:focus {
+      color: #121212;
+      background: #ffe08a;
+      text-shadow: none;
+      outline: none;
     }
     #${OVERLAY_ID} .yll-overlay-word.is-current {
       color: #121212;
@@ -1386,6 +1409,7 @@ function mountPanel() {
     <div id="${LIST_ID}"></div>
   `;
   panel.querySelector<HTMLButtonElement>(".yll-close")?.addEventListener("click", () => {
+    runtime.__yllSafePanelDismissedVideoId = getVideoId();
     panel.remove();
     document.getElementById(OVERLAY_ID)?.remove();
     document.getElementById(WORD_POPOVER_ID)?.remove();
@@ -1393,11 +1417,6 @@ function mountPanel() {
     document.getElementById(PRACTICE_ID)?.remove();
     closeLibraryPanel();
     document.documentElement.classList.remove("yll-hide-native-captions");
-    if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
-    runtime.__yllSafeTimer = undefined;
-    if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
-    runtime.__yllSafeOverlayTimer = undefined;
-    runtime.__yllSafeTranslationToken = undefined;
   });
   panel.querySelector<HTMLSelectElement>("[data-yll-mode-select]")?.addEventListener("change", (event) => {
     const select = event.currentTarget as HTMLSelectElement;
@@ -1858,9 +1877,10 @@ function mountWordPopover() {
   return popover;
 }
 
-function showWordPopover(word: string, message: string, options: { canSave?: boolean; startMs?: number; meaning?: string } = {}) {
+function showWordPopover(word: string, message: string, options: { canSave?: boolean; startMs?: number; meaning?: string; anchor?: DOMRect } = {}) {
   const popover = mountWordPopover();
   popover.hidden = false;
+  positionWordPopover(popover, options.anchor);
   popover.innerHTML = `
     <strong>${escapeHtml(word)}</strong>
     <p>${escapeHtml(message)}</p>
@@ -1874,6 +1894,23 @@ function showWordPopover(word: string, message: string, options: { canSave?: boo
     const result = await saveVocabulary(button.dataset.word ?? word, Number(button.dataset.start ?? "0"), button.dataset.meaning ?? options.meaning ?? "");
     button.textContent = result ? "已收藏" : "收藏失败";
   });
+}
+
+function positionWordPopover(popover: HTMLElement, anchor?: DOMRect) {
+  if (!anchor) {
+    popover.style.left = "";
+    popover.style.top = "";
+    popover.style.right = "394px";
+    popover.style.width = "";
+    return;
+  }
+  const width = Math.min(260, Math.max(220, window.innerWidth - 24));
+  const left = Math.min(window.innerWidth - width - 12, Math.max(12, anchor.left + anchor.width / 2 - width / 2));
+  const top = Math.max(12, anchor.top - 12 - 88);
+  popover.style.width = `${width}px`;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+  popover.style.right = "auto";
 }
 
 function showSentenceInsight(cue: LabCue) {
@@ -2533,7 +2570,25 @@ function setOverlayCue(cue?: LabCue) {
     ${showSource ? `<span class="yll-overlay-source">${renderOverlaySourceText(cue, settings)}</span>` : ""}
     ${translationText ? `<span class="yll-overlay-translation">${escapeHtml(translationText)}</span>` : ""}
   `;
+  bindOverlayWordEvents(overlay);
   overlay.classList.add("is-visible");
+}
+
+function bindOverlayWordEvents(overlay: HTMLElement) {
+  overlay.querySelectorAll<HTMLElement>(".yll-overlay-word[data-word]").forEach((wordElement) => {
+    const lookup = () => {
+      const word = wordElement.dataset.word;
+      if (!word) return;
+      void lookupWord(word, wordElement.dataset.start, wordElement.getBoundingClientRect());
+    };
+    wordElement.addEventListener("mouseenter", lookup);
+    wordElement.addEventListener("focus", lookup);
+    wordElement.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      lookup();
+    });
+  });
 }
 
 function renderRows(rows: LabCue[]) {
@@ -2622,7 +2677,7 @@ function renderRows(rows: LabCue[]) {
       if (wordElement?.dataset.word) {
         event.preventDefault();
         event.stopPropagation();
-        void lookupWord(wordElement.dataset.word, button.dataset.start);
+        void lookupWord(wordElement.dataset.word, button.dataset.start, wordElement.getBoundingClientRect());
         return;
       }
       activateRow();
@@ -3292,11 +3347,22 @@ function maybeRetryMissingTranslations() {
   void translateRowsForCurrentVideo("自动翻译补跑");
 }
 
-async function lookupWord(word: string, startMs?: string) {
+async function lookupWord(word: string, startMs?: string, anchor?: DOMRect) {
   const cleaned = cleanText(word).slice(0, 48);
   if (!cleaned) return;
-  showWordPopover(cleaned, "正在查询...");
+  const cacheKey = cleaned.toLowerCase();
+  const cached = runtime.__yllSafeWordLookupCache?.get(cacheKey);
   const parsedStartMs = Number(startMs ?? "0");
+  if (cached) {
+    showWordPopover(cleaned, cached, {
+      canSave: true,
+      startMs: parsedStartMs,
+      meaning: cached,
+      anchor
+    });
+    return;
+  }
+  showWordPopover(cleaned, "正在查询...", { anchor });
   const videoId = getVideoId() || "current";
   const cue: LabCue = {
     startMs: parsedStartMs,
@@ -3304,16 +3370,28 @@ async function lookupWord(word: string, startMs?: string) {
     text: cleaned,
     source: "official"
   };
+  runtime.__yllSafeWordLookupPending ??= new Map<string, Promise<string | undefined>>();
+  const pendingLookup = runtime.__yllSafeWordLookupPending.get(cacheKey);
+  const lookupPromise = pendingLookup ?? translateCueBatch(videoId, [cue]).then((translated) => translated[0]?.translatedText);
+  if (!pendingLookup) runtime.__yllSafeWordLookupPending.set(cacheKey, lookupPromise);
   try {
-    const translated = await translateCueBatch(videoId, [cue]);
-    const translatedText = translated[0]?.translatedText;
+    const translatedText = await lookupPromise;
+    if (translatedText) {
+      runtime.__yllSafeWordLookupCache ??= new Map<string, string>();
+      runtime.__yllSafeWordLookupCache.set(cacheKey, translatedText);
+    }
     showWordPopover(cleaned, translatedText || "暂时没有查到译文。", {
       canSave: true,
       startMs: parsedStartMs,
-      meaning: translatedText
+      meaning: translatedText,
+      anchor
     });
   } catch (error) {
-    showWordPopover(cleaned, `查词失败：${toErrorMessage(error)}`);
+    showWordPopover(cleaned, `查词失败：${toErrorMessage(error)}`, { anchor });
+  } finally {
+    if (runtime.__yllSafeWordLookupPending?.get(cacheKey) === lookupPromise) {
+      runtime.__yllSafeWordLookupPending.delete(cacheKey);
+    }
   }
 }
 
@@ -4437,9 +4515,6 @@ function tick() {
       return;
     }
 
-    mountPanel();
-    mountOverlay();
-    positionOverlay();
     const currentVideoId = getVideoId();
     if (runtime.__yllSafeLastVideoId !== currentVideoId) {
       clearScheduledOfficialRetry();
@@ -4465,9 +4540,16 @@ function tick() {
       runtime.__yllSafeLastOfficialDebug = undefined;
       runtime.__yllSafeExpandedInsightKey = undefined;
       runtime.__yllSafeWasAdShowing = false;
+      runtime.__yllSafePanelDismissedVideoId = undefined;
       document.getElementById(WORD_POPOVER_ID)?.remove();
       document.getElementById(SETTINGS_PANEL_ID)?.remove();
       document.getElementById(PRACTICE_ID)?.remove();
+    }
+    const panelDismissed = Boolean(currentVideoId && runtime.__yllSafePanelDismissedVideoId === currentVideoId);
+    if (!panelDismissed) {
+      mountPanel();
+      mountOverlay();
+      positionOverlay();
     }
     if (isYouTubeAdShowing()) {
       if (!runtime.__yllSafeWasAdShowing) {
@@ -4543,6 +4625,7 @@ window.addEventListener("yll-safe-reload", () => {
   runtime.__yllSafeOfficialAttemptCount = undefined;
   runtime.__yllSafeLastOfficialDebug = undefined;
   runtime.__yllSafeWasAdShowing = false;
+  runtime.__yllSafePanelDismissedVideoId = undefined;
   document.getElementById(WORD_POPOVER_ID)?.remove();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(PRACTICE_ID)?.remove();

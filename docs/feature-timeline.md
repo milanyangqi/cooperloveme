@@ -384,6 +384,11 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - local checks passed: `npm run build`, `git diff --check`
   - pending extension reload and Chrome review
 
+- Local `0.1.138` popup version-card compacting:
+  - reduced the current-version status card padding and margin, aligned the badge vertically, and constrained the description to a single ellipsized line
+  - local checks passed: `npm run build`, `git diff --check`
+  - pending extension reload and Chrome review
+
 ### 2026-06-03
 
 - Local `0.1.90` translation auto-retry recovery:

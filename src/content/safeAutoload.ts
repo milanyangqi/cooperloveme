@@ -80,6 +80,7 @@ type LibraryVocab = {
   text?: string;
   normalizedText?: string;
   language?: string;
+  wordbookId?: string;
   meaning?: string;
   sourceSentence?: string;
   translatedSentence?: string;
@@ -102,9 +103,18 @@ type LibraryAttempt = {
 };
 
 type LibrarySnapshot = {
+  wordbooks?: LibraryWordbook[];
   vocabItems?: LibraryVocab[];
   sentenceNotes?: LibrarySentence[];
   practiceAttempts?: LibraryAttempt[];
+};
+
+type LibraryWordbook = {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 const PANEL_ID = "yll-lab-panel-v2";
@@ -126,7 +136,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.125";
+const SCRIPT_VERSION = "0.1.126";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -139,7 +149,8 @@ const MAX_ESTIMATED_WORD_DURATION_MS = 2400;
 const MIN_TIMED_WORD_COVERAGE_RATIO = 0.82;
 const MIN_TIMED_WORD_SPAN_RATIO = 0.45;
 const TARGET_LANGUAGE = "zh-CN";
-const TRANSLATION_BATCH_SIZE = 18;
+const TRANSLATION_INITIAL_BATCH_SIZE = 6;
+const TRANSLATION_BATCH_SIZE = 10;
 const TRANSLATION_RETRY_LIMIT = 3;
 const TRANSLATION_RETRY_BACKOFF_MS = 15000;
 const OFFICIAL_RETRY_MS = 3500;
@@ -205,6 +216,7 @@ const runtime = window as typeof window & {
   __yllSafeSettings?: SafeSettings;
   __yllSafeScriptVersion?: string;
   __yllSafeStopCurrentScript?: () => void;
+  __yllSafeContextInvalidated?: boolean;
   __yllSafeIsLoadingOfficial?: boolean;
   __yllSafeCanUseVisibleFallback?: boolean;
   __yllSafeLastFailure?: string;
@@ -220,6 +232,7 @@ const runtime = window as typeof window & {
   __yllSafeWasAdShowing?: boolean;
   __yllSafeLibraryOpen?: boolean;
   __yllSafeLastLibraryToggleAt?: number;
+  __yllSafeSelectedWordbookId?: string;
   __yllSafePanelDismissedVideoId?: string;
   __yllSafeWordLookupCache?: Map<string, string>;
   __yllSafeWordLookupPending?: Map<string, Promise<string | undefined>>;
@@ -230,6 +243,8 @@ const runtime = window as typeof window & {
     get?: (key: string) => unknown;
   };
 };
+
+runtime.__yllSafeContextInvalidated = false;
 
 function removeLegacyContentApp() {
   document.getElementById(LEGACY_HOST_ID)?.remove();
@@ -284,6 +299,17 @@ function stopCurrentScriptInstance() {
   document.documentElement.classList.remove("yll-hide-native-captions");
 }
 
+function stopTimers() {
+  if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
+  runtime.__yllSafeTimer = undefined;
+  if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);
+  runtime.__yllSafeOverlayTimer = undefined;
+  if (runtime.__yllSafeOfficialRetryTimer) window.clearTimeout(runtime.__yllSafeOfficialRetryTimer);
+  runtime.__yllSafeOfficialRetryTimer = undefined;
+  clearScheduledOfficialRetry();
+  clearStartupOfficialRetries();
+}
+
 function announceScriptVersion() {
   runtime.__yllSafeScriptVersion = SCRIPT_VERSION;
   runtime.__yllSafeStopCurrentScript = stopCurrentScriptInstance;
@@ -298,6 +324,18 @@ window.addEventListener("yll-safe-version-active", (event) => {
   const version = String((event as CustomEvent<{ version?: string }>).detail?.version ?? "");
   if (!version || version === SCRIPT_VERSION) return;
   if (compareSemverish(version, SCRIPT_VERSION) > 0) stopCurrentScriptInstance();
+});
+
+window.addEventListener("error", (event) => {
+  if (!isExtensionContextInvalidated(event.message)) return;
+  event.preventDefault();
+  handleInvalidatedExtensionContext();
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (!isExtensionContextInvalidated(toErrorMessage(event.reason))) return;
+  event.preventDefault();
+  handleInvalidatedExtensionContext();
 });
 
 function installTimedTextCaptureListener() {
@@ -1160,6 +1198,37 @@ function installStyle() {
       gap: 8px;
       margin: 10px 0 2px;
     }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-tools {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-create {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    #${LIBRARY_PANEL_ID} select,
+    #${LIBRARY_PANEL_ID} input[type="text"] {
+      min-height: 32px;
+      min-width: 0;
+      color: #f7f8f8;
+      background: #1d2023;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 7px;
+      padding: 0 9px;
+      outline: none;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-meta {
+      color: #a3aab5;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
     #${LIBRARY_PANEL_ID} .yll-library-actions button {
       padding: 8px 10px;
       color: #161616;
@@ -1168,6 +1237,13 @@ function installStyle() {
       border-radius: 7px;
       font-weight: 820;
       cursor: pointer;
+    }
+    #${LIBRARY_PANEL_ID} .yll-library-actions button.secondary,
+    #${LIBRARY_PANEL_ID} .yll-wordbook-create button,
+    #${LIBRARY_PANEL_ID} .yll-wordbook-row button {
+      color: #f7f8f8;
+      background: #2d3034;
+      border: 1px solid rgba(255,255,255,.14);
     }
     #${LIBRARY_PANEL_ID} .yll-library-item {
       padding: 8px 0;
@@ -1523,7 +1599,9 @@ function openPopupDock() {
 
   const iframe = document.createElement("iframe");
   iframe.title = "YouTube Language Lab";
-  iframe.src = chrome.runtime.getURL(`popup.html?dock=1&v=${SCRIPT_VERSION}`);
+  const popupUrl = getRuntimeUrl(`popup.html?dock=1&v=${SCRIPT_VERSION}`);
+  if (!popupUrl) return undefined;
+  iframe.src = popupUrl;
   iframe.setAttribute("allow", "microphone");
 
   dock.append(closeButton, iframe);
@@ -1690,13 +1768,38 @@ function closeLibraryPanel() {
 }
 
 function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
+  const wordbooks = sortLibraryItems(library.wordbooks ?? []);
   const vocabItems = sortLibraryItems(library.vocabItems ?? []);
   const sentenceNotes = sortLibraryItems(library.sentenceNotes ?? []);
   const practiceAttempts = sortLibraryItems(library.practiceAttempts ?? []);
+  const selectedWordbook = selectLibraryWordbook(wordbooks, vocabItems);
+  const selectedWordbookId = selectedWordbook?.id ?? "";
+  const legacyWordbookId = (wordbooks.find((item) => item.name === "默认词本") ?? wordbooks[0])?.id ?? selectedWordbookId;
+  runtime.__yllSafeSelectedWordbookId = selectedWordbookId || undefined;
+  const wordbookVocabItems = vocabItems.filter((item) => (item.wordbookId ?? legacyWordbookId) === selectedWordbookId);
   panel.innerHTML = `
     <div class="yll-library-head">
       <h3>本地学习库</h3>
       <button class="yll-library-close" type="button">关闭</button>
+    </div>
+    <div class="yll-wordbook-tools">
+      <div class="yll-wordbook-row">
+        <select data-wordbook-select aria-label="选择词本">
+          ${wordbooks.map((wordbook) => `
+            <option value="${escapeHtml(wordbook.id)}" ${wordbook.id === selectedWordbookId ? "selected" : ""}>
+              ${escapeHtml(wordbook.name)} (${vocabItems.filter((item) => (item.wordbookId ?? legacyWordbookId) === wordbook.id).length})
+            </option>
+          `).join("")}
+        </select>
+        <button type="button" data-wordbook-export>导出词本</button>
+      </div>
+      <div class="yll-wordbook-create">
+        <input type="text" maxlength="40" placeholder="新建词本名称" data-wordbook-name>
+        <button type="button" data-wordbook-create>新建</button>
+      </div>
+      <div class="yll-wordbook-meta">
+        当前词本：${escapeHtml(selectedWordbook?.name ?? "默认词本")} · ${wordbookVocabItems.length} 个单词
+      </div>
     </div>
     <div class="yll-library-stats">
       <div class="yll-library-stat"><strong>${sentenceNotes.length}</strong>句子</div>
@@ -1705,15 +1808,17 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
     </div>
     <div class="yll-library-actions">
       ${sentenceNotes.length ? `<button type="button" data-library-practice-sentences>练习收藏句</button>` : ""}
+      <button class="secondary" type="button" data-wordbook-import>导入单词</button>
       <button type="button" data-library-export-json>导出 JSON</button>
       <button type="button" data-library-export-csv>导出 CSV</button>
       <button type="button" data-library-export-anki>导出 Anki</button>
     </div>
+    <input data-wordbook-import-file type="file" accept=".csv,.json,text/csv,application/json" hidden>
     ${renderLibrarySection("最近收藏句", sentenceNotes.slice(0, 6), (item) => ({
       main: item.text ?? "",
       sub: item.translatedText ?? formatLibraryTime(item.createdAt)
     }))}
-    ${renderLibrarySection("最近词汇", vocabItems.slice(0, 8), (item) => ({
+    ${renderLibrarySection(`当前词本：${selectedWordbook?.name ?? "默认词本"}`, wordbookVocabItems.slice(0, 12), (item) => ({
       main: item.text ?? "",
       sub: item.meaning || item.sourceSentence || formatLibraryTime(item.createdAt)
     }))}
@@ -1723,6 +1828,76 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
     }))}
   `;
   panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => closeLibraryPanel());
+  panel.querySelector<HTMLSelectElement>("[data-wordbook-select]")?.addEventListener("change", (event) => {
+    const select = event.currentTarget as HTMLSelectElement;
+    runtime.__yllSafeSelectedWordbookId = select.value || undefined;
+    renderLibraryPanel(panel, library);
+  });
+  panel.querySelector<HTMLButtonElement>("[data-wordbook-create]")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const input = panel.querySelector<HTMLInputElement>("[data-wordbook-name]");
+    const name = input?.value.trim() ?? "";
+    if (!name) {
+      if (input) input.focus();
+      return;
+    }
+    const originalLabel = button.textContent ?? "新建";
+    button.textContent = "创建中...";
+    try {
+      const response = await sendRuntimeMessage<LibraryWordbook>({ type: "CREATE_WORDBOOK", payload: { name } });
+      if (!response?.ok) throw new Error(response?.error ?? "创建词本失败");
+      runtime.__yllSafeSelectedWordbookId = response.data.id;
+      const updated = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
+      if (!updated?.ok) throw new Error(updated?.error ?? "刷新词本失败");
+      renderLibraryPanel(panel, updated.data ?? {});
+    } catch (error) {
+      button.textContent = `失败：${toErrorMessage(error).slice(0, 12)}`;
+      window.setTimeout(() => {
+        button.textContent = originalLabel;
+      }, 1600);
+    }
+  });
+  panel.querySelector<HTMLButtonElement>("[data-wordbook-export]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    const filename = `youtube-language-lab-${safeFilename(selectedWordbook?.name ?? "wordbook")}-${dateSlug()}.csv`;
+    downloadTextFile(filename, vocabToCsv(wordbookVocabItems, selectedWordbook), "text/csv;charset=utf-8");
+    button.textContent = "已导出";
+    window.setTimeout(() => {
+      button.textContent = "导出词本";
+    }, 1400);
+  });
+  panel.querySelector<HTMLButtonElement>("[data-wordbook-import]")?.addEventListener("click", () => {
+    panel.querySelector<HTMLInputElement>("[data-wordbook-import-file]")?.click();
+  });
+  panel.querySelector<HTMLInputElement>("[data-wordbook-import-file]")?.addEventListener("change", async (event) => {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const importButton = panel.querySelector<HTMLButtonElement>("[data-wordbook-import]");
+    const originalLabel = importButton?.textContent ?? "导入单词";
+    if (importButton) importButton.textContent = "导入中...";
+    try {
+      const items = parseVocabImport(await file.text(), file.name);
+      const response = await sendRuntimeMessage<{ imported: number }>({
+        type: "IMPORT_VOCAB",
+        payload: { wordbookId: selectedWordbookId || undefined, items }
+      });
+      if (!response?.ok) throw new Error(response?.error ?? "导入失败");
+      const updated = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
+      if (!updated?.ok) throw new Error(updated?.error ?? "刷新学习库失败");
+      renderLibraryPanel(panel, updated.data ?? {});
+      setStatus(`已导入 ${response.data.imported} 个单词。`);
+    } catch (error) {
+      if (importButton) {
+        importButton.textContent = `失败：${toErrorMessage(error).slice(0, 12)}`;
+        window.setTimeout(() => {
+          importButton.textContent = originalLabel;
+        }, 1800);
+      }
+    } finally {
+      input.value = "";
+    }
+  });
   panel.querySelector<HTMLButtonElement>("[data-library-export-json]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const originalLabel = button.textContent ?? "导出 JSON";
@@ -1741,7 +1916,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
   });
   panel.querySelector<HTMLButtonElement>("[data-library-export-csv]")?.addEventListener("click", (event) => {
     const button = event.currentTarget as HTMLButtonElement;
-    downloadTextFile(`youtube-language-lab-library-${dateSlug()}.csv`, libraryToCsv({ vocabItems, sentenceNotes, practiceAttempts }), "text/csv;charset=utf-8");
+    downloadTextFile(`youtube-language-lab-library-${dateSlug()}.csv`, libraryToCsv({ wordbooks, vocabItems, sentenceNotes, practiceAttempts }), "text/csv;charset=utf-8");
     button.textContent = "已导出 CSV";
     window.setTimeout(() => {
       button.textContent = "导出 CSV";
@@ -1801,13 +1976,15 @@ function downloadTextFile(filename: string, content: string, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function libraryToCsv(library: Required<LibrarySnapshot>) {
+function libraryToCsv(library: { vocabItems: LibraryVocab[]; sentenceNotes: LibrarySentence[]; practiceAttempts: LibraryAttempt[]; wordbooks?: LibraryWordbook[] }) {
+  const wordbookNameById = new Map((library.wordbooks ?? []).map((wordbook) => [wordbook.id, wordbook.name]));
   const rows: string[] = [
-    csvLine(["type", "text", "translation_or_meaning", "mode", "score", "video_id", "cue_id", "start_ms", "duration_ms", "created_at"])
+    csvLine(["type", "wordbook", "text", "translation_or_meaning", "mode", "score", "video_id", "cue_id", "start_ms", "duration_ms", "created_at"])
   ];
   library.sentenceNotes.forEach((item) => {
     rows.push(csvLine([
       "sentence",
+      "",
       item.text,
       item.translatedText,
       "",
@@ -1822,6 +1999,7 @@ function libraryToCsv(library: Required<LibrarySnapshot>) {
   library.vocabItems.forEach((item) => {
     rows.push(csvLine([
       "vocab",
+      wordbookNameById.get(item.wordbookId ?? "") ?? "默认词本",
       item.text,
       item.meaning || item.translatedSentence || item.sourceSentence,
       "",
@@ -1836,6 +2014,7 @@ function libraryToCsv(library: Required<LibrarySnapshot>) {
   library.practiceAttempts.forEach((item) => {
     rows.push(csvLine([
       "practice",
+      "",
       item.expected,
       item.answer,
       practiceModeLabel(item.mode),
@@ -1848,6 +2027,109 @@ function libraryToCsv(library: Required<LibrarySnapshot>) {
     ]));
   });
   return `${rows.join("\n")}\n`;
+}
+
+function selectLibraryWordbook(wordbooks: LibraryWordbook[], vocabItems: LibraryVocab[]) {
+  const selectedId = runtime.__yllSafeSelectedWordbookId;
+  const selected = selectedId ? wordbooks.find((item) => item.id === selectedId) : undefined;
+  if (selected) return selected;
+  const defaultWordbook = wordbooks.find((item) => item.name === "默认词本") ?? wordbooks[0];
+  if (defaultWordbook) return defaultWordbook;
+  if (!vocabItems.length) return undefined;
+  return { id: "", name: "默认词本" };
+}
+
+function vocabToCsv(vocabItems: LibraryVocab[], wordbook?: LibraryWordbook) {
+  const rows = [
+    csvLine(["wordbook", "text", "meaning", "language", "source_sentence", "translated_sentence", "mastery", "created_at"]),
+    ...vocabItems.map((item) => csvLine([
+      wordbook?.name ?? "默认词本",
+      item.text,
+      item.meaning,
+      item.language ?? "en",
+      item.sourceSentence,
+      item.translatedSentence,
+      item.mastery,
+      item.createdAt
+    ]))
+  ];
+  return `${rows.join("\n")}\n`;
+}
+
+function safeFilename(value: string) {
+  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").slice(0, 48) || "wordbook";
+}
+
+function parseVocabImport(content: string, filename: string): Array<{ text: string; language: string; meaning?: string; sourceSentence?: string; translatedSentence?: string }> {
+  const trimmed = content.trim();
+  if (!trimmed) return [];
+  if (filename.toLowerCase().endsWith(".json") || trimmed.startsWith("[")) {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!Array.isArray(parsed)) throw new Error("JSON 必须是单词数组。");
+    return parsed.map((item) => {
+      const record = item as Record<string, unknown>;
+      return {
+        text: String(record.text ?? record.word ?? "").trim(),
+        language: String(record.language ?? "en"),
+        meaning: record.meaning === undefined ? undefined : String(record.meaning),
+        sourceSentence: record.sourceSentence === undefined ? undefined : String(record.sourceSentence),
+        translatedSentence: record.translatedSentence === undefined ? undefined : String(record.translatedSentence)
+      };
+    }).filter((item) => item.text);
+  }
+
+  const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return [];
+  const header = splitCsvLine(lines[0]).map((item) => item.trim().toLowerCase());
+  const hasHeader = header.includes("text") || header.includes("word");
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const indexOf = (names: string[], fallback: number) => {
+    const index = names.map((name) => header.indexOf(name)).find((index) => index >= 0);
+    return index ?? fallback;
+  };
+  const textIndex = hasHeader ? indexOf(["text", "word", "单词"], 0) : 0;
+  const meaningIndex = hasHeader ? indexOf(["meaning", "translation", "释义"], 1) : 1;
+  const languageIndex = hasHeader ? indexOf(["language", "lang"], 2) : 2;
+  const sourceIndex = hasHeader ? indexOf(["source_sentence", "sourcesentence", "sentence"], 3) : 3;
+  const translatedIndex = hasHeader ? indexOf(["translated_sentence", "translatedsentence"], 4) : 4;
+
+  return dataLines.map((line) => {
+    const cells = splitCsvLine(line);
+    return {
+      text: (cells[textIndex] ?? "").trim(),
+      meaning: cells[meaningIndex]?.trim() || undefined,
+      language: cells[languageIndex]?.trim() || "en",
+      sourceSentence: cells[sourceIndex]?.trim() || undefined,
+      translatedSentence: cells[translatedIndex]?.trim() || undefined
+    };
+  }).filter((item) => item.text);
+}
+
+function splitCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current);
+  return cells;
 }
 
 function sentenceNotesToAnkiCsv(sentenceNotes: LibrarySentence[]) {
@@ -2260,6 +2542,7 @@ async function saveVocabulary(word: string, startMs: number, meaning?: string) {
     payload: {
       text: cleanText(word).slice(0, 64),
       language: "en",
+      wordbookId: runtime.__yllSafeSelectedWordbookId,
       meaning: meaning || undefined,
       sourceSentence: cue?.text,
       translatedSentence: cue?.translatedText,
@@ -2861,6 +3144,7 @@ function selectActiveCue(rows: LabCue[], currentMs: number) {
 }
 
 function refreshOverlayHighlight() {
+  if (runtime.__yllSafeContextInvalidated) return;
   const rows = runtime.__yllSafeRows ?? [];
   const video = getMainVideo();
   const overlay = document.getElementById(OVERLAY_ID);
@@ -3035,15 +3319,34 @@ function toErrorMessage(error: unknown) {
   return typeof error === "string" ? error : "未知错误";
 }
 
+function getRuntimeUrl(path: string) {
+  try {
+    return chrome.runtime.getURL(path);
+  } catch (error) {
+    const errorMessage = toErrorMessage(error);
+    if (isExtensionContextInvalidated(errorMessage)) {
+      handleInvalidatedExtensionContext();
+    } else {
+      addDebugLog("runtime-url-error", { error: errorMessage });
+    }
+    return undefined;
+  }
+}
+
 function isExtensionContextInvalidated(message?: string) {
   return /extension context invalidated|context invalidated|extension context/i.test(message ?? "");
 }
 
 function handleInvalidatedExtensionContext() {
+  runtime.__yllSafeContextInvalidated = true;
+  stopTimers();
   setStatus("扩展上下文已过期。请点击 popup 的“唤醒面板”重新注入新版脚本。");
   addDebugLog("extension-context-invalidated", { version: SCRIPT_VERSION });
   closeLibraryPanel();
+  document.getElementById(OVERLAY_ID)?.remove();
   document.getElementById(WORD_POPOVER_ID)?.remove();
+  document.getElementById(SETTINGS_PANEL_ID)?.remove();
+  document.getElementById(PRACTICE_ID)?.remove();
 }
 
 function parsePlayerResponseFromScripts() {
@@ -3329,6 +3632,17 @@ async function translateCueBatch(videoId: string, cues: LabCue[]) {
   return response.data;
 }
 
+function prioritizeTranslationRows(rows: LabCue[]) {
+  const video = getMainVideo();
+  const currentMs = video && Number.isFinite(video.currentTime) ? video.currentTime * 1000 : rows[0]?.startMs ?? 0;
+  return [...rows].sort((a, b) => {
+    const aDistance = Math.abs(a.startMs - currentMs);
+    const bDistance = Math.abs(b.startMs - currentMs);
+    if (aDistance !== bDistance) return aDistance - bDistance;
+    return a.startMs - b.startMs;
+  });
+}
+
 async function translateRowsForCurrentVideo(sourceLabel: string) {
   const videoId = getVideoId();
   const rows = runtime.__yllSafeRows ?? [];
@@ -3341,7 +3655,7 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
   runtime.__yllSafeTranslationToken = token;
   runtime.__yllSafeTranslatedVideoId = videoId;
   runtime.__yllSafeIsTranslating = true;
-  const translatable = rows.filter((row) => !row.translatedText);
+  const translatable = prioritizeTranslationRows(rows.filter((row) => !row.translatedText));
   if (!translatable.length) {
     runtime.__yllSafeIsTranslating = false;
     return;
@@ -3352,9 +3666,11 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
     const translatedByKey = new Map<string, { translatedText?: string; provider?: string }>();
     let failedBatches = 0;
     let completedBatches = 0;
-    for (let index = 0; index < translatable.length; index += TRANSLATION_BATCH_SIZE) {
+    for (let index = 0; index < translatable.length;) {
       if (runtime.__yllSafeTranslationToken !== token || getVideoId() !== videoId) return;
-      const batch = translatable.slice(index, index + TRANSLATION_BATCH_SIZE);
+      const batchSize = index === 0 ? TRANSLATION_INITIAL_BATCH_SIZE : TRANSLATION_BATCH_SIZE;
+      const batch = translatable.slice(index, index + batchSize);
+      index += batch.length;
       try {
         const translated = await translateCueBatch(videoId, batch);
         if (runtime.__yllSafeTranslationToken !== token || getVideoId() !== videoId || (runtime.__yllSafeRowsGeneration ?? 0) !== rowsGeneration) {
@@ -3400,7 +3716,7 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
       });
       renderRows(runtime.__yllSafeRows);
       updateActiveCue();
-      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
     }
     if (runtime.__yllSafeTranslationToken === token && getVideoId() === videoId) {
       const translatedRows = runtime.__yllSafeRows?.filter((cue) => cue.translatedText).length ?? 0;
@@ -4595,6 +4911,7 @@ function captureVisibleFallback() {
 }
 
 function tick() {
+  if (runtime.__yllSafeContextInvalidated) return;
   try {
     if (!isWatchPage()) {
       clearScheduledOfficialRetry();
@@ -4703,6 +5020,7 @@ function tick() {
 }
 
 function start() {
+  if (runtime.__yllSafeContextInvalidated) return;
   announceScriptVersion();
   runtime.__yllSafeDebugSnapshot = debugSnapshot;
   if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);

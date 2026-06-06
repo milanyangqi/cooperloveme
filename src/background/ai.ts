@@ -102,7 +102,7 @@ export async function translateCuesWithAi(
 }
 
 async function translateCuesWithWeb(cues: CaptionCue[], targetLanguage: string): Promise<TranslatedCue[]> {
-  return mapWithConcurrency(cues, 4, async (cue) => {
+  return mapWithConcurrency(cues, 6, async (cue) => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         return await translateCueWithWeb(cue, targetLanguage);

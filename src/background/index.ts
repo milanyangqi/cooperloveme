@@ -22,7 +22,8 @@ import type {
   SentenceNote,
   UsageEvent,
   UsageFeature,
-  VocabItem
+  VocabItem,
+  Wordbook
 } from "../shared/types";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -206,6 +207,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
     case "GET_LIBRARY":
       return loadLibrary(localUser.id);
 
+    case "CREATE_WORDBOOK":
+      return createWordbook(localUser.id, message.payload.name, message.payload.description);
+
     case "SAVE_SENTENCE": {
       const now = new Date().toISOString();
       const note: SentenceNote = {
@@ -221,10 +225,14 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
 
     case "SAVE_VOCAB": {
       const now = new Date().toISOString();
+      const wordbook = message.payload.wordbookId
+        ? undefined
+        : await ensureDefaultWordbook(localUser.id);
       const item: VocabItem = {
         ...message.payload,
         id: createId("vocab"),
         userId: localUser.id,
+        wordbookId: message.payload.wordbookId ?? wordbook?.id,
         normalizedText: normalizeText(message.payload.text),
         mastery: 0,
         createdAt: now,
@@ -232,6 +240,41 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
         syncStatus: "local-only"
       };
       return putRecord("vocabItems", item);
+    }
+
+    case "IMPORT_VOCAB": {
+      const now = new Date().toISOString();
+      const defaultWordbook = await ensureDefaultWordbook(localUser.id);
+      const wordbookId = message.payload.wordbookId ?? defaultWordbook.id;
+      const existing = await listByUser<VocabItem>("vocabItems", localUser.id);
+      const existingKeys = new Set(existing.map((item) => `${item.wordbookId ?? defaultWordbook.id}:${normalizeText(item.text)}`));
+      const imported: VocabItem[] = [];
+
+      for (const draft of message.payload.items) {
+        const text = draft.text.trim();
+        if (!text) continue;
+        const key = `${wordbookId ?? ""}:${normalizeText(text)}`;
+        if (existingKeys.has(key)) continue;
+        existingKeys.add(key);
+        const item: VocabItem = {
+          text,
+          language: draft.language || "en",
+          meaning: draft.meaning,
+          sourceSentence: draft.sourceSentence,
+          translatedSentence: draft.translatedSentence,
+          id: createId("vocab"),
+          userId: localUser.id,
+          wordbookId,
+          normalizedText: normalizeText(text),
+          mastery: 0,
+          createdAt: now,
+          updatedAt: now,
+          syncStatus: "local-only"
+        };
+        imported.push(await putRecord("vocabItems", item));
+      }
+
+      return { imported: imported.length, items: imported };
     }
 
     case "SAVE_PRACTICE_ATTEMPT": {
@@ -701,14 +744,48 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
 }
 
 async function loadLibrary(userId: string) {
-  const [vocabItems, sentenceNotes, practiceAttempts, usageEvents] = await Promise.all([
+  const defaultWordbook = await ensureDefaultWordbook(userId);
+  const [wordbooks, vocabItems, sentenceNotes, practiceAttempts, usageEvents] = await Promise.all([
+    listByUser<Wordbook>("wordbooks", userId),
     listByUser<VocabItem>("vocabItems", userId),
     listByUser<SentenceNote>("sentenceNotes", userId),
     listByUser<PracticeAttempt>("practiceAttempts", userId),
     listByUser<UsageEvent>("usageEvents", userId)
   ]);
 
-  return { vocabItems, sentenceNotes, practiceAttempts, usageEvents };
+  const mergedWordbooks = wordbooks.some((item) => item.id === defaultWordbook.id)
+    ? wordbooks
+    : [defaultWordbook, ...wordbooks];
+
+  return { wordbooks: mergedWordbooks, vocabItems, sentenceNotes, practiceAttempts, usageEvents };
+}
+
+async function ensureDefaultWordbook(userId: string): Promise<Wordbook> {
+  const existing = await listByUser<Wordbook>("wordbooks", userId);
+  const found = existing.find((item) => item.name === "默认词本");
+  if (found) return found;
+
+  return createWordbook(userId, "默认词本", "自动创建，用于保存未指定词本的单词。");
+}
+
+async function createWordbook(userId: string, name: string, description?: string): Promise<Wordbook> {
+  const cleanName = name.trim().slice(0, 40);
+  if (!cleanName) throw new Error("请输入词本名称。");
+  const now = new Date().toISOString();
+  const existing = await listByUser<Wordbook>("wordbooks", userId);
+  const duplicate = existing.find((item) => item.name.trim().toLowerCase() === cleanName.toLowerCase());
+  if (duplicate) return duplicate;
+
+  const wordbook: Wordbook = {
+    id: createId("wordbook"),
+    userId,
+    name: cleanName,
+    description: description?.trim() || undefined,
+    createdAt: now,
+    updatedAt: now,
+    syncStatus: "local-only"
+  };
+  return putRecord("wordbooks", wordbook);
 }
 
 async function guardQuota(userId: string, feature: UsageFeature, cost: number): Promise<void> {

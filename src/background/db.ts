@@ -4,15 +4,16 @@ import type {
   SentenceNote,
   SyncRecord,
   UsageEvent,
-  VocabItem
+  VocabItem,
+  Wordbook
 } from "../shared/types";
 
-export type StoreName = "vocabItems" | "sentenceNotes" | "practiceAttempts" | "usageEvents" | "syncRecords";
+export type StoreName = "wordbooks" | "vocabItems" | "sentenceNotes" | "practiceAttempts" | "usageEvents" | "syncRecords";
 
-type StoreRecord = VocabItem | SentenceNote | PracticeAttempt | UsageEvent | SyncRecord;
+type StoreRecord = Wordbook | VocabItem | SentenceNote | PracticeAttempt | UsageEvent | SyncRecord;
 
 const DB_NAME = "youtube-language-lab";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase> | undefined;
 
@@ -31,6 +32,7 @@ export function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const db = request.result;
+      if (!db.objectStoreNames.contains("wordbooks")) createStore(db, "wordbooks");
       if (!db.objectStoreNames.contains("vocabItems")) createStore(db, "vocabItems");
       if (!db.objectStoreNames.contains("sentenceNotes")) createStore(db, "sentenceNotes");
       if (!db.objectStoreNames.contains("practiceAttempts")) createStore(db, "practiceAttempts");
@@ -87,7 +89,7 @@ export async function listByUser<T extends StoreRecord>(storeName: StoreName, us
 
 export async function clearAllStores(): Promise<void> {
   const db = await openDatabase();
-  const storeNames: StoreName[] = ["vocabItems", "sentenceNotes", "practiceAttempts", "usageEvents", "syncRecords"];
+  const storeNames: StoreName[] = ["wordbooks", "vocabItems", "sentenceNotes", "practiceAttempts", "usageEvents", "syncRecords"];
 
   await Promise.all(
     storeNames.map(
@@ -104,9 +106,10 @@ export async function clearAllStores(): Promise<void> {
 }
 
 export async function buildExportBundle(
-  base: Omit<ExportBundle, "vocabItems" | "sentenceNotes" | "practiceAttempts" | "usageEvents">
+  base: Omit<ExportBundle, "wordbooks" | "vocabItems" | "sentenceNotes" | "practiceAttempts" | "usageEvents">
 ): Promise<ExportBundle> {
-  const [vocabItems, sentenceNotes, practiceAttempts, usageEvents] = await Promise.all([
+  const [wordbooks, vocabItems, sentenceNotes, practiceAttempts, usageEvents] = await Promise.all([
+    listByUser<Wordbook>("wordbooks", base.user.id),
     listByUser<VocabItem>("vocabItems", base.user.id),
     listByUser<SentenceNote>("sentenceNotes", base.user.id),
     listByUser<PracticeAttempt>("practiceAttempts", base.user.id),
@@ -115,6 +118,7 @@ export async function buildExportBundle(
 
   return {
     ...base,
+    wordbooks,
     vocabItems,
     sentenceNotes,
     practiceAttempts,

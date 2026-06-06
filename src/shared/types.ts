@@ -19,7 +19,7 @@ export type UsageStatus = "success" | "failed" | "skipped";
 
 export type PracticeMode = "shadowing" | "dictation" | "cloze" | "quiz";
 
-export type SyncEntity = "vocab" | "sentence" | "practiceAttempt" | "settings";
+export type SyncEntity = "vocab" | "wordbook" | "sentence" | "practiceAttempt" | "settings";
 
 export type SyncStatus = "local-only" | "pending" | "synced" | "conflict";
 
@@ -207,6 +207,7 @@ export interface TranslatedCue extends CaptionCue {
 export interface VocabItem {
   id: string;
   userId: string;
+  wordbookId?: string;
   text: string;
   normalizedText: string;
   language: string;
@@ -218,6 +219,16 @@ export interface VocabItem {
   createdAt: string;
   updatedAt: string;
   mastery: 0 | 1 | 2 | 3 | 4 | 5;
+  syncStatus: SyncStatus;
+}
+
+export interface Wordbook {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
   syncStatus: SyncStatus;
 }
 
@@ -319,6 +330,7 @@ export interface ExportBundle {
   user: UserProfile;
   entitlement: EntitlementSnapshot;
   settings: ExtensionSettings;
+  wordbooks: Wordbook[];
   vocabItems: VocabItem[];
   sentenceNotes: SentenceNote[];
   practiceAttempts: PracticeAttempt[];
@@ -339,6 +351,11 @@ export interface RuntimeRequestMap {
   UPDATE_SETTINGS: Partial<ExtensionSettings>;
   UPDATE_SECRETS: Partial<SecretSettings>;
   GET_LIBRARY: undefined;
+  CREATE_WORDBOOK: { name: string; description?: string };
+  IMPORT_VOCAB: {
+    wordbookId?: string;
+    items: Array<Pick<VocabItem, "text" | "language"> & Partial<Pick<VocabItem, "meaning" | "sourceSentence" | "translatedSentence">>>;
+  };
   SAVE_SENTENCE: Omit<SentenceNote, "id" | "userId" | "createdAt" | "updatedAt" | "syncStatus">;
   SAVE_VOCAB: Omit<VocabItem, "id" | "userId" | "createdAt" | "updatedAt" | "syncStatus" | "mastery" | "normalizedText">;
   SAVE_PRACTICE_ATTEMPT: Omit<PracticeAttempt, "id" | "userId" | "createdAt" | "syncStatus">;

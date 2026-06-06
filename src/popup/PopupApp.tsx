@@ -38,6 +38,7 @@ type PopupBootstrap = {
   settings: ExtensionSettings;
   entitlement: EntitlementSnapshot;
   library: {
+    wordbooks: unknown[];
     vocabItems: unknown[];
     sentenceNotes: unknown[];
     practiceAttempts: unknown[];
@@ -629,8 +630,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.125 待审核</strong>
-              <p>唤醒面板和重读字幕不再关闭页面内容器。</p>
+              <strong>0.1.126 待审核</strong>
+              <p>新增多词本管理、单词导入导出，并加速当前字幕翻译。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

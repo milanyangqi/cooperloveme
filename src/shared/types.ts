@@ -353,6 +353,7 @@ export interface RuntimeRequestMap {
   GET_LIBRARY: undefined;
   CREATE_WORDBOOK: { name: string; description?: string };
   DELETE_VOCAB: { id: string };
+  UPDATE_VOCAB_MASTERY: { id: string; mastery: VocabItem["mastery"] };
   IMPORT_VOCAB: {
     wordbookId?: string;
     items: Array<Pick<VocabItem, "text" | "language"> & Partial<Pick<VocabItem, "meaning" | "sourceSentence" | "translatedSentence">>>;

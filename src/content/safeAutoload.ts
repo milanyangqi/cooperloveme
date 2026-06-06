@@ -92,6 +92,8 @@ type LibraryVocab = {
   updatedAt?: string;
 };
 
+type LibraryVocabTab = "new" | "mastered";
+
 type LibraryAttempt = {
   mode?: string;
   practiceItemId?: string;
@@ -137,7 +139,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.128";
+const SCRIPT_VERSION = "0.1.129";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -234,6 +236,9 @@ const runtime = window as typeof window & {
   __yllSafeLibraryOpen?: boolean;
   __yllSafeLibraryLoading?: boolean;
   __yllSafeLastLibraryToggleAt?: number;
+  __yllSafeLibraryVocabTab?: LibraryVocabTab;
+  __yllSafeLibraryBlurMeanings?: boolean;
+  __yllSafeLibraryExpandedVocabId?: string;
   __yllSafeSelectedWordbookId?: string;
   __yllSafePanelDismissedVideoId?: string;
   __yllSafeWordLookupCache?: Map<string, string>;
@@ -1262,6 +1267,153 @@ function installStyle() {
       min-width: 0;
     }
     #${LIBRARY_PANEL_ID} .yll-library-item:first-of-type { border-top: 0; }
+    #${LIBRARY_PANEL_ID} .yll-vocab-manager {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,.12);
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-tabs {
+      display: grid;
+      grid-template-columns: auto auto minmax(0, 1fr);
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-tab {
+      position: relative;
+      padding: 0 0 8px;
+      color: #aeb5bd;
+      background: transparent;
+      border: 0;
+      font-weight: 780;
+      cursor: pointer;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-tab.is-active {
+      color: #fff;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-tab.is-active::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      background: #ff7a1a;
+      border-radius: 999px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-blur-toggle {
+      justify-self: end;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #cfd4dc;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-blur-toggle input {
+      appearance: none;
+      width: 32px;
+      height: 18px;
+      margin: 0;
+      background: #4b5055;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background .16s ease;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-blur-toggle input::after {
+      content: "";
+      display: block;
+      width: 14px;
+      height: 14px;
+      margin: 2px;
+      background: #fff;
+      border-radius: 999px;
+      transition: transform .16s ease;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-blur-toggle input:checked {
+      background: #ff7a1a;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-blur-toggle input:checked::after {
+      transform: translateX(14px);
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-list {
+      display: grid;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 0 11px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-progress {
+      position: absolute;
+      left: 0;
+      bottom: -1px;
+      height: 2px;
+      width: var(--yll-vocab-progress, 8%);
+      background: #ff7a1a;
+      border-radius: 999px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-word {
+      color: #fff;
+      font-size: 15px;
+      font-weight: 790;
+      overflow-wrap: anywhere;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-meaning {
+      margin-left: 6px;
+      color: #cfd4dc;
+      font-size: 13px;
+      font-weight: 540;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-meaning.is-blurred {
+      filter: blur(4px);
+      user-select: none;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-source {
+      margin-top: 4px;
+      color: #9aa2ad;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-icon {
+      width: 28px;
+      height: 28px;
+      display: inline-grid;
+      place-items: center;
+      color: #aeb5bd;
+      background: transparent;
+      border: 0;
+      border-left: 1px solid rgba(255,255,255,.1);
+      cursor: pointer;
+      font-size: 17px;
+      line-height: 1;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-icon:first-of-type {
+      border-left: 0;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-icon.is-on {
+      color: #ff7a1a;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-icon:hover,
+    #${LIBRARY_PANEL_ID} .yll-vocab-icon:focus {
+      color: #fff;
+      outline: none;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-detail {
+      grid-column: 1 / -1;
+      margin-top: -2px;
+      padding: 8px 10px;
+      color: #cfd4dc;
+      background: rgba(255,255,255,.05);
+      border-radius: 6px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-vocab-detail button {
+      margin-top: 8px;
+    }
     #${LIBRARY_PANEL_ID} .yll-library-delete {
       min-width: 48px;
       height: 28px;
@@ -1877,7 +2029,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       main: item.text ?? "",
       sub: item.translatedText ?? formatLibraryTime(item.createdAt)
     }))}
-    ${renderVocabLibrarySection(`当前词本：${selectedWordbook?.name ?? "默认词本"}`, wordbookVocabItems)}
+    ${renderVocabLibrarySection(wordbookVocabItems)}
     ${renderLibrarySection("最近练习", practiceAttempts.slice(0, 6), (item) => ({
       main: `${practiceModeLabel(item.mode)} · ${Math.round(Number(item.score ?? 0))} 分`,
       sub: item.expected || formatLibraryTime(item.createdAt)
@@ -1954,6 +2106,17 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       input.value = "";
     }
   });
+  panel.querySelectorAll<HTMLButtonElement>("[data-vocab-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tab = button.getAttribute("data-vocab-tab");
+      runtime.__yllSafeLibraryVocabTab = tab === "mastered" ? "mastered" : "new";
+      renderLibraryPanel(panel, library);
+    });
+  });
+  panel.querySelector<HTMLInputElement>("[data-vocab-blur]")?.addEventListener("change", (event) => {
+    runtime.__yllSafeLibraryBlurMeanings = (event.currentTarget as HTMLInputElement).checked;
+    renderLibraryPanel(panel, library);
+  });
   panel.querySelectorAll<HTMLButtonElement>("[data-vocab-delete]").forEach((button) => {
     button.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -1979,6 +2142,36 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
           button.title = "";
         }, 1600);
       }
+    });
+  });
+  panel.querySelectorAll<HTMLButtonElement>("[data-vocab-mastery]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.getAttribute("data-vocab-mastery");
+      const mastery = Number(button.getAttribute("data-next-mastery")) as 0 | 1 | 2 | 3 | 4 | 5;
+      if (!id) return;
+      button.disabled = true;
+      try {
+        const response = await sendRuntimeMessage<LibraryVocab>({ type: "UPDATE_VOCAB_MASTERY", payload: { id, mastery } });
+        if (!response?.ok) throw new Error(response?.error ?? "更新掌握状态失败");
+        const updated = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
+        if (!updated?.ok) throw new Error(updated?.error ?? "刷新学习库失败");
+        renderLibraryPanel(panel, updated.data ?? {});
+        setStatus(mastery >= 5 ? "已标记为掌握。" : "已移回生词。");
+      } catch (error) {
+        button.disabled = false;
+        button.title = toErrorMessage(error);
+      }
+    });
+  });
+  panel.querySelectorAll<HTMLButtonElement>("[data-vocab-detail]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.getAttribute("data-vocab-detail");
+      runtime.__yllSafeLibraryExpandedVocabId = runtime.__yllSafeLibraryExpandedVocabId === id ? undefined : id ?? undefined;
+      renderLibraryPanel(panel, library);
     });
   });
   panel.querySelector<HTMLButtonElement>("[data-library-export-json]")?.addEventListener("click", async (event) => {
@@ -2253,23 +2446,64 @@ function renderLibrarySection<T>(title: string, items: T[], render: (item: T) =>
   `;
 }
 
-function renderVocabLibrarySection(title: string, items: LibraryVocab[]) {
-  const body = items.length
-    ? items.map((item) => `
-      <div class="yll-library-item">
-        <div class="yll-library-item-text">
-          <div class="yll-library-main">${escapeHtml(item.text || "未命名")}</div>
-          <div class="yll-library-sub">${escapeHtml(item.meaning || item.sourceSentence || formatLibraryTime(item.createdAt))}</div>
-        </div>
-        <button class="yll-library-delete" type="button" data-vocab-delete="${escapeHtml(item.id)}">删除</button>
-      </div>
-    `).join("")
+function renderVocabLibrarySection(items: LibraryVocab[]) {
+  const activeTab = runtime.__yllSafeLibraryVocabTab ?? "new";
+  const blurMeanings = Boolean(runtime.__yllSafeLibraryBlurMeanings);
+  const newItems = items.filter((item) => Number(item.mastery ?? 0) < 5);
+  const masteredItems = items.filter((item) => Number(item.mastery ?? 0) >= 5);
+  const visibleItems = activeTab === "mastered" ? masteredItems : newItems;
+  const body = visibleItems.length
+    ? visibleItems.map((item) => renderVocabManagerRow(item, blurMeanings)).join("")
     : `<div class="yll-library-empty">暂无记录</div>`;
   return `
-    <section class="yll-library-section">
-      <h4>${escapeHtml(title)}</h4>
-      ${body}
+    <section class="yll-vocab-manager">
+      <div class="yll-vocab-tabs">
+        <button class="yll-vocab-tab ${activeTab === "new" ? "is-active" : ""}" type="button" data-vocab-tab="new">
+          本页生词 (${newItems.length})
+        </button>
+        <button class="yll-vocab-tab ${activeTab === "mastered" ? "is-active" : ""}" type="button" data-vocab-tab="mastered">
+          已掌握 (${masteredItems.length})
+        </button>
+        <label class="yll-vocab-blur-toggle">
+          模糊本页生词释义
+          <input type="checkbox" data-vocab-blur ${blurMeanings ? "checked" : ""}>
+        </label>
+      </div>
+      <div class="yll-vocab-list">${body}</div>
     </section>
+  `;
+}
+
+function renderVocabManagerRow(item: LibraryVocab, blurMeanings: boolean) {
+  const mastery = Math.max(0, Math.min(5, Number(item.mastery ?? 0)));
+  const mastered = mastery >= 5;
+  const progress = mastered ? 100 : Math.max(8, Math.round((mastery / 5) * 100));
+  const expanded = runtime.__yllSafeLibraryExpandedVocabId === item.id;
+  const meaning = item.meaning || item.translatedSentence || "暂无释义";
+  const source = item.sourceSentence || item.translatedSentence || formatLibraryTime(item.createdAt);
+  return `
+    <div class="yll-vocab-row" style="--yll-vocab-progress:${progress}%">
+      <div>
+        <div class="yll-vocab-word">
+          ${escapeHtml(item.text || "未命名")}
+          <span class="yll-vocab-meaning ${blurMeanings && !mastered ? "is-blurred" : ""}">${escapeHtml(meaning)}</span>
+        </div>
+        ${source ? `<div class="yll-vocab-source">${escapeHtml(source)}</div>` : ""}
+      </div>
+      <button class="yll-vocab-icon is-on" type="button" title="移出词本" aria-label="移出词本" data-vocab-delete="${escapeHtml(item.id)}">♥</button>
+      <button class="yll-vocab-icon ${mastered ? "is-on" : ""}" type="button" title="${mastered ? "移回生词" : "标记掌握"}" aria-label="${mastered ? "移回生词" : "标记掌握"}" data-vocab-mastery="${escapeHtml(item.id)}" data-next-mastery="${mastered ? 0 : 5}">✓✓</button>
+      <button class="yll-vocab-icon" type="button" title="查看详情" aria-label="查看详情" data-vocab-detail="${escapeHtml(item.id)}">›</button>
+      ${expanded ? `
+        <div class="yll-vocab-detail">
+          <div>单词：${escapeHtml(item.text || "")}</div>
+          <div>释义：${escapeHtml(meaning)}</div>
+          ${item.sourceSentence ? `<div>例句：${escapeHtml(item.sourceSentence)}</div>` : ""}
+          ${item.translatedSentence ? `<div>译文：${escapeHtml(item.translatedSentence)}</div>` : ""}
+          <button class="yll-library-delete" type="button" data-vocab-delete="${escapeHtml(item.id)}">删除</button>
+        </div>
+      ` : ""}
+      <span class="yll-vocab-progress" aria-hidden="true"></span>
+    </div>
   `;
 }
 

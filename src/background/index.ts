@@ -213,6 +213,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
     case "DELETE_VOCAB":
       return deleteVocabItem(localUser.id, message.payload.id);
 
+    case "UPDATE_VOCAB_MASTERY":
+      return updateVocabMastery(localUser.id, message.payload.id, message.payload.mastery);
+
     case "SAVE_SENTENCE": {
       const now = new Date().toISOString();
       const note: SentenceNote = {
@@ -796,6 +799,18 @@ async function deleteVocabItem(userId: string, id: string): Promise<{ deleted: b
   if (!item || item.userId !== userId) return { deleted: false };
   await deleteRecord("vocabItems", id);
   return { deleted: true };
+}
+
+async function updateVocabMastery(userId: string, id: string, mastery: VocabItem["mastery"]): Promise<VocabItem | undefined> {
+  const item = await getRecord<VocabItem>("vocabItems", id);
+  if (!item || item.userId !== userId) return undefined;
+  const updated: VocabItem = {
+    ...item,
+    mastery,
+    updatedAt: new Date().toISOString(),
+    syncStatus: "local-only"
+  };
+  return putRecord("vocabItems", updated);
 }
 
 async function guardQuota(userId: string, feature: UsageFeature, cost: number): Promise<void> {

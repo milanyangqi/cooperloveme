@@ -630,8 +630,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.128 待审核</strong>
-              <p>学习库在状态通知、字幕重读和脚本恢复时保持打开。</p>
+              <strong>0.1.129 待审核</strong>
+              <p>词本单词改为同行式生词/已掌握管理和释义模糊练习。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 22:52:00 CST
+Last updated: 2026-06-06 23:14:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-06 22:52 CST | `0.1.135` makes popup `重读字幕` force the next official-track load pass instead of only restarting normal polling | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-06 23:14 CST | `0.1.136` restores stronger official-caption retry behavior after checking the known-good `0.1.53` recovery path: captured timedtext, captionTracks/playerResponse, transcript, player timedtext, and YouTubei retries before visible fallback | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -33,8 +33,8 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
 | Comprehension quiz mode | In Review | 2026-06-03 13:05 CST | `0.1.81` saves quiz attempts to the local practice history after an option is selected | Needs generated questions and richer feedback. |
-| Sentence save / collection | In Review | 2026-06-04 17:49 CST | `0.1.94` restores per-row practice and save actions in the right-side caption list | Needs extension reload and Chrome review. |
-| Vocabulary library | In Review | 2026-06-06 22:52 CST | `0.1.135` moves the learning-library view into popup/dock, disables the old right-panel library overlay, and broadcasts library writes for live popup refresh | Needs extension reload and Chrome review. |
+| Sentence save / collection | In Review | 2026-06-06 23:14 CST | `0.1.136` adds a signed-in popup action to save the current playback subtitle sentence, keeping the right panel subtitle-only | Needs extension reload and Chrome review. |
+| Vocabulary library | In Review | 2026-06-06 23:14 CST | `0.1.136` adds popup/dock wordbook creation, current-wordbook export, selected-wordbook browsing, and saved-sentence preview | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
 | Cloud sync | In Review | 2026-06-06 22:24 CST | `0.1.134` adds authenticated Supabase REST sync for wordbooks, vocab, saved sentences, practice attempts, and settings, with cloud tables deployed by `learning_data_sync` | Needs extension reload and signed-in manual sync review. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
@@ -349,6 +349,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - broadcast learning-library changes after vocab, sentence, wordbook, import, mastery, and practice writes so popup lists refresh without reopening
   - popup `本页生词` now updates its local bootstrap state immediately after `生词` or `掌握` actions, then reloads from background storage
   - `重读字幕` now marks the next caption load as a forced official-track pass, instead of only restarting the regular poll loop
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.136` official-caption retry and popup library management:
+  - reviewed the known-good `0.1.53` caption recovery notes, where official subtitles loaded through captured timedtext, captionTracks/playerResponse, transcript, player timedtext, and YouTubei retries before visible fallback
+  - raised official auto attempts from 2 to 6 and widened slow official attempt timeout from 8.5s to 12s so late YouTube caption tracks have time to resolve
+  - added signed-in popup action `收藏当前句`, which sends an in-page event to save the current active subtitle cue as a sentence note
+  - added popup/dock learning-library controls for selecting a wordbook, creating a new wordbook, exporting the current wordbook, and previewing saved sentences
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

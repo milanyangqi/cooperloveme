@@ -142,6 +142,7 @@ export function PopupApp() {
   const [pageWords, setPageWords] = useState<PageWord[]>([]);
   const [wordActionBusy, setWordActionBusy] = useState("");
   const [libraryWordbookId, setLibraryWordbookId] = useState("");
+  const [newWordbookName, setNewWordbookName] = useState("");
 
   const syncPopupHeightWithCaptionPanel = async () => {
     if (isDocked) {
@@ -445,6 +446,60 @@ export function PopupApp() {
     setActiveView("library");
     setStatus("学习库已打开。");
     await reloadBootstrap();
+  };
+
+  const saveCurrentSentence = async () => {
+    try {
+      setStatus("正在收藏当前句...");
+      await wakeSafeContentScript("新版字幕面板已唤醒，正在收藏当前句。");
+      const opened = await dispatchActiveYouTubeEvent("yll-save-current-sentence");
+      setStatus(opened ? "已发送收藏当前句指令。" : "请先切换到 YouTube 视频播放页。");
+      await reloadBootstrap();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "收藏当前句失败。");
+    }
+  };
+
+  const createLibraryWordbook = async () => {
+    const name = newWordbookName.trim();
+    if (!name) {
+      setStatus("请输入新词本名称。");
+      return;
+    }
+    setStatus("正在新建词本...");
+    const response = await sendRuntimeMessage<WordbookPreview>({ type: "CREATE_WORDBOOK", payload: { name } });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+    setNewWordbookName("");
+    setLibraryWordbookId(response.data.id ?? "");
+    setStatus(`已新建词本：${response.data.name ?? name}`);
+    await reloadBootstrap();
+  };
+
+  const exportCurrentWordbook = () => {
+    const selectedWordbook = wordbooks.find((wordbook) => wordbook.id === selectedLibraryWordbookId);
+    const rows = [
+      ["wordbook", "text", "meaning", "source_sentence", "translated_sentence", "mastery"],
+      ...libraryWords.map((item) => [
+        selectedWordbook?.name ?? "默认词本",
+        item.text ?? "",
+        item.meaning ?? "",
+        item.sourceSentence ?? "",
+        item.translatedSentence ?? "",
+        String(item.mastery ?? 0)
+      ])
+    ];
+    const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `youtube-language-lab-${safeFilename(selectedWordbook?.name ?? "wordbook")}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setStatus("当前词本已导出。");
   };
 
   const startBilling = async () => {
@@ -765,13 +820,19 @@ export function PopupApp() {
               <BookOpen size={17} />
               重读字幕
             </button>
+            {isSignedIn ? (
+              <button type="button" onClick={saveCurrentSentence}>
+                <BookMarked size={17} />
+                收藏当前句
+              </button>
+            ) : null}
           </div>
 
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.135 待审核</strong>
-              <p>修复设置页滚动，并新增 Supabase 学习数据同步。</p>
+              <strong>0.1.136 待审核</strong>
+              <p>恢复官方字幕重试强度，并补全词本管理与句子收藏入口。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -948,6 +1009,17 @@ export function PopupApp() {
                 </select>
                 <button type="button" onClick={syncLibrary}>同步</button>
               </div>
+              <div className="library-manage">
+                <input
+                  type="text"
+                  maxLength={40}
+                  placeholder="新建词本名称"
+                  value={newWordbookName}
+                  onChange={(event) => setNewWordbookName(event.target.value)}
+                />
+                <button type="button" onClick={createLibraryWordbook}>新建词本</button>
+                <button type="button" onClick={exportCurrentWordbook}>导出当前词本</button>
+              </div>
               <div className="library-summary">
                 <span>生词 {libraryWords.filter((item) => (item.mastery ?? 0) < 4).length}</span>
                 <span>已掌握 {libraryWords.filter((item) => (item.mastery ?? 0) >= 4).length}</span>
@@ -967,6 +1039,20 @@ export function PopupApp() {
                     <CircleAlert size={18} />
                     <span>当前词本还没有单词。</span>
                   </div>
+                )}
+              </div>
+              <div className="popup-sentence-list">
+                <strong>收藏句</strong>
+                {sentenceNotes.length ? sentenceNotes.slice(0, 8).map((item, index) => (
+                  <button key={`${item.text ?? "sentence"}-${index}`} type="button" onClick={openPractice}>
+                    <span>
+                      <em>{item.text ?? "未命名例句"}</em>
+                      <small>{item.translatedText ?? "译文待补充"}</small>
+                    </span>
+                    <ChevronRight size={15} />
+                  </button>
+                )) : (
+                  <small>暂无收藏句。可在视频页点击“收藏当前句”。</small>
                 )}
               </div>
               <button className="detail-action" type="button" onClick={openPractice}>打开混合练习</button>
@@ -1080,6 +1166,14 @@ function PreviewWordRow({
 
 function normalizePreviewWord(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function csvCell(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function safeFilename(value: string): string {
+  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").slice(0, 48) || "wordbook";
 }
 
 function previewEmptyText(tab: PreviewTab, totalPageWords: number): string {

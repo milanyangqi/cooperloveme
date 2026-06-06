@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.135";
+const SCRIPT_VERSION = "0.1.136";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -159,9 +159,9 @@ const TRANSLATION_RETRY_LIMIT = 3;
 const TRANSLATION_RETRY_BACKOFF_MS = 15000;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 6000;
-const OFFICIAL_AUTO_ATTEMPTS = 2;
+const OFFICIAL_AUTO_ATTEMPTS = 6;
 const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 3500;
-const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 8500;
+const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 12000;
 const USER_SCROLL_PAUSE_MS = 4200;
 
 type SafeSettings = {
@@ -5425,6 +5425,21 @@ window.addEventListener("yll-open-practice", () => {
       return;
     }
     openPracticeOverlay();
+  });
+});
+window.addEventListener("yll-save-current-sentence", () => {
+  void requireSignedInFeature("收藏当前句").then(async (allowed) => {
+    if (!allowed) return;
+    if (!(runtime.__yllSafeRows ?? []).length) {
+      setStatus("正在读取字幕，稍后再收藏当前句。");
+      await loadRowsForCurrentVideo({ force: true, reason: "save-current-sentence" }).catch((error) => setStatus(`收藏当前句失败：${toErrorMessage(error)}`));
+    }
+    const cue = currentCue();
+    if (!cue) {
+      setStatus("当前还没有可收藏的字幕句子。");
+      return;
+    }
+    setStatus(await saveSentenceNote(cue) ? "当前句已收藏。" : "当前句收藏失败。");
   });
 });
 window.addEventListener("yll-open-library", () => {

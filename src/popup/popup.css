@@ -629,6 +629,29 @@ html.yll-dock-popup .popup {
   padding: 0 10px;
 }
 
+.library-manage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.library-manage input,
+.library-manage button {
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #202326;
+  color: #f7f8f8;
+  padding: 0 10px;
+}
+
+.library-manage button {
+  background: #ffc857;
+  color: #111315;
+  font-weight: 760;
+}
+
 .library-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -695,6 +718,55 @@ html.yll-dock-popup .popup {
   font-size: 12px;
   font-style: normal;
   font-weight: 760;
+}
+
+.popup-sentence-list {
+  margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #151719;
+  padding: 10px;
+}
+
+.popup-sentence-list > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #ffc857;
+  font-size: 13px;
+}
+
+.popup-sentence-list button {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  color: #f7f8f8;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  text-align: left;
+}
+
+.popup-sentence-list button:first-of-type {
+  border-top: 0;
+}
+
+.popup-sentence-list em,
+.popup-sentence-list small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.popup-sentence-list small {
+  margin-top: 3px;
+  color: #a3aab5;
 }
 
 .detail-row {

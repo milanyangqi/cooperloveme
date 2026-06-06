@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 13:24:00 CST
+Last updated: 2026-06-07 14:02:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-07 13:24 CST | `0.1.146` restores the known-good `0.1.53` style of running complete official paths, including transcript panel and player timedtext, before visible fallback | Needs Chrome timing review on fresh page load and after extension reload. |
+| Official YouTube caption loading | In Review | 2026-06-07 14:02 CST | `0.1.147` accepts current-segment YouTube `video.textTracks` as official rows so official loading stops spinning and page vocabulary can read rendered rows while fuller timedtext paths continue to exist | Needs Chrome timing review on fresh page load and after extension reload. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -27,14 +27,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
 | Free translation fallback | In Review | 2026-06-06 19:57 CST | `0.1.126` prioritizes current-cue translation, uses a smaller first batch, and stops invalidated stale scripts to avoid overlay flicker | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | In Review | 2026-06-06 13:51 CST | `0.1.115` enables hover/click lookup on video overlay words and reuses cached or pending free-translation lookups | Needs Chrome hover review. |
-| Subtitle settings panel | In Review | 2026-06-07 13:24 CST | `0.1.146` keeps subtitle style controls, adds restore defaults, and moves highlighter/annotation controls into a separate panel | Needs extension reload and Chrome review. |
+| Subtitle settings panel | In Review | 2026-06-07 14:02 CST | `0.1.147` updates default subtitle colors to white/gray text, purple highlight, and darker overlay background while keeping restore defaults | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-07 12:08 CST | `0.1.144` exposes a direct content-script practice opener and keeps rendered subtitle rows available for practice when the row cache is temporarily empty | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
 | Comprehension quiz mode | In Review | 2026-06-03 13:05 CST | `0.1.81` saves quiz attempts to the local practice history after an option is selected | Needs generated questions and richer feedback. |
 | Sentence save / collection | In Review | 2026-06-07 10:18 CST | `0.1.138` adds `收藏该句` on page-vocab rows so a word's source subtitle sentence can be collected directly | Needs extension reload and Chrome review. |
-| Vocabulary library | In Review | 2026-06-07 11:05 CST | `0.1.141` turns the learning-library summary blocks into selectable 生词 / 已掌握 / 收藏句 filters while preserving wordbook create/export/delete controls | Needs extension reload and Chrome review. |
+| Vocabulary library | In Review | 2026-06-07 14:02 CST | `0.1.147` adds a Relingo-style wordbook catalog with local wordbooks, level wordbooks, Premium wordbooks, counts, progress bars, and row arrows while preserving create/import/export | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
 | Cloud sync | In Review | 2026-06-07 12:42 CST | `0.1.145` keeps upload and pull actions but changes popup/options user-facing labels and errors to 云端 terminology | Needs extension reload and signed-in manual sync review. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
@@ -448,6 +448,15 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - temporary `video.textTracks 临时` rows wait until at least the second official pass, so partial rows do not hide earlier official-track results
   - popup settings adds a separate `高亮和注释` entry, and the content settings panel now has a dedicated highlighter/annotation page
   - subtitle settings panel adds `恢复默认设置`
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.147` textTracks acceptance, wordbook catalog, and default colors:
+  - treats current-segment `video.textTracks` rows from YouTube as official enough to stop the loading spinner instead of leaving the panel in `正在读取官方字幕`
+  - textTracks source badges now display as `官方`
+  - popup page vocabulary can read the rendered subtitle rows once textTracks are accepted, avoiding an empty `本页生词` block while captions are visible
+  - learning library adds a wordbook catalog modeled on the reference layout: 我的生词本, 等级词本, Premium 词本, counts, progress bars, and arrows
+  - default subtitle colors now use white source text, light-gray translation, purple highlight, and a darker overlay background
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

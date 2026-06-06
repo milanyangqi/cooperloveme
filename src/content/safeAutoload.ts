@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.146";
+const SCRIPT_VERSION = "0.1.147";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -197,7 +197,7 @@ const DEFAULT_SETTINGS: SafeSettings = {
   overlayPositionPercent: 82,
   overlayFontSize: 24,
   translationFontSize: 20,
-  overlayBackgroundOpacity: 72,
+  overlayBackgroundOpacity: 88,
   syncOffsetMs: 0,
   wordHighlightOffsetMs: 0,
   highlightCurrentWord: true,
@@ -206,9 +206,9 @@ const DEFAULT_SETTINGS: SafeSettings = {
   wordProgressEnabled: true,
   sourceFontFamily: "system-ui",
   translationFontFamily: "system-ui",
-  sourceColor: "#f7f8f8",
-  translationColor: "#f5e86e",
-  highlightColor: "#ffc857",
+  sourceColor: "#f5f5f5",
+  translationColor: "#e6e6e6",
+  highlightColor: "#8b5cf6",
   overlayBackgroundColor: "#000000"
 };
 
@@ -1367,6 +1367,80 @@ function installStyle() {
       font-size: 12px;
       overflow-wrap: anywhere;
     }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-catalog {
+      display: grid;
+      gap: 8px;
+      padding: 4px 0 10px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-section-title {
+      margin: 12px 0 4px;
+      padding-left: 9px;
+      color: #f7f8f8;
+      border-left: 4px solid #ff7a1a;
+      font-size: 13px;
+      font-weight: 840;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-card-row {
+      width: 100%;
+      min-height: 40px;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto 72px 18px;
+      align-items: center;
+      gap: 9px;
+      color: #d8dde4;
+      background: transparent;
+      border: 0;
+      border-radius: 7px;
+      padding: 5px 6px;
+      text-align: left;
+      cursor: pointer;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-card-row.is-active,
+    #${LIBRARY_PANEL_ID} .yll-wordbook-card-row:hover {
+      background: rgba(255,122,26,.08);
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-icon {
+      width: 24px;
+      height: 24px;
+      display: inline-grid;
+      place-items: center;
+      color: #ff7a1a;
+      background: rgba(255,122,26,.08);
+      border: 1px solid rgba(255,122,26,.34);
+      border-radius: 7px;
+      font-size: 14px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-name {
+      min-width: 0;
+      color: #f2f4f6;
+      font-weight: 780;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-count {
+      color: #aeb5bd;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-progress-track {
+      height: 8px;
+      overflow: hidden;
+      background: #3c3f43;
+      border-radius: 999px;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-progress-bar {
+      display: block;
+      height: 100%;
+      width: var(--yll-wordbook-progress, 0%);
+      background: #ff7a1a;
+      border-radius: inherit;
+    }
+    #${LIBRARY_PANEL_ID} .yll-wordbook-arrow {
+      color: #89919b;
+      font-size: 23px;
+      line-height: 1;
+    }
     #${LIBRARY_PANEL_ID} .yll-library-actions button {
       padding: 8px 10px;
       color: #161616;
@@ -1978,7 +2052,7 @@ function setCaptionStatus(text: string, sourceLabel?: string) {
 function captionSourceText(sourceLabel: string) {
   if (/页面字幕|采集|visible/i.test(sourceLabel)) return "页面采集";
   if (/Transcript|transcript/i.test(sourceLabel)) return "Transcript";
-  if (/textTracks/i.test(sourceLabel)) return "TextTrack";
+  if (/textTracks/i.test(sourceLabel)) return "官方";
   if (/timedtext/i.test(sourceLabel)) return "TimedText";
   return "官方";
 }
@@ -2150,6 +2224,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
         当前词本：${escapeHtml(selectedWordbook?.name ?? "默认词本")} · ${wordbookVocabItems.length} 个单词
       </div>
     </div>
+    ${renderWordbookCatalog(wordbooks, vocabItems, selectedWordbookId, legacyWordbookId)}
     <div class="yll-library-stats">
       <div class="yll-library-stat"><strong>${sentenceNotes.length}</strong>句子</div>
       <div class="yll-library-stat"><strong>${vocabItems.length}</strong>词汇</div>
@@ -2178,6 +2253,14 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
     const select = event.currentTarget as HTMLSelectElement;
     runtime.__yllSafeSelectedWordbookId = select.value || undefined;
     renderLibraryPanel(panel, library);
+  });
+  panel.querySelectorAll<HTMLButtonElement>("[data-wordbook-pick]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.dataset.wordbookPick;
+      if (!id) return;
+      runtime.__yllSafeSelectedWordbookId = id;
+      renderLibraryPanel(panel, library);
+    });
   });
   panel.querySelector<HTMLButtonElement>("[data-wordbook-create]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -2612,6 +2695,65 @@ function renderLibrarySection<T>(title: string, items: T[], render: (item: T) =>
       <h4>${escapeHtml(title)}</h4>
       ${body}
     </section>
+  `;
+}
+
+function renderWordbookCatalog(wordbooks: LibraryWordbook[], vocabItems: LibraryVocab[], selectedWordbookId: string, legacyWordbookId: string) {
+  const countForWordbook = (id: string) => vocabItems.filter((item) => (item.wordbookId ?? legacyWordbookId) === id).length;
+  const localRows = wordbooks.length
+    ? wordbooks.map((wordbook) => {
+      const count = countForWordbook(wordbook.id);
+      return renderWordbookCatalogRow({
+        id: wordbook.id,
+        name: wordbook.name || "未命名词本",
+        count,
+        total: Math.max(20, count),
+        selected: wordbook.id === selectedWordbookId,
+        interactive: true
+      });
+    }).join("")
+    : renderWordbookCatalogRow({ name: "我的生词本", count: 0, total: 20 });
+  const levelRows = [
+    ["A1 入门", 0, 9017],
+    ["A2 初级", 0, 7960],
+    ["B1 中级", 0, 6694],
+    ["B2 中高级", 0, 4568],
+    ["C1 高级", 0, 2371],
+    ["C2 精通", 0, 1242]
+  ].map(([name, count, total]) => renderWordbookCatalogRow({ name: String(name), count: Number(count), total: Number(total) })).join("");
+  const premiumRows = [
+    ["词组", 0, 1711],
+    ["GRE", 0, 6514],
+    ["IELTS", 0, 3575],
+    ["TOEFL", 0, 4264],
+    ["SAT", 0, 4462],
+    ["CET4", 0, 2607],
+    ["CET6", 0, 2345]
+  ].map(([name, count, total]) => renderWordbookCatalogRow({ name: String(name), count: Number(count), total: Number(total) })).join("");
+  return `
+    <div class="yll-wordbook-catalog">
+      <div class="yll-wordbook-section-title">我的生词本</div>
+      ${localRows}
+      <div class="yll-wordbook-section-title">等级词本</div>
+      ${levelRows}
+      <div class="yll-wordbook-section-title">Premium 词本</div>
+      ${premiumRows}
+    </div>
+  `;
+}
+
+function renderWordbookCatalogRow(options: { id?: string; name: string; count: number; total: number; selected?: boolean; interactive?: boolean }) {
+  const total = Math.max(1, options.total);
+  const progress = Math.max(0, Math.min(100, Math.round((options.count / total) * 100)));
+  const attrs = options.interactive && options.id ? `data-wordbook-pick="${escapeHtml(options.id)}"` : "disabled";
+  return `
+    <button class="yll-wordbook-card-row ${options.selected ? "is-active" : ""}" type="button" ${attrs}>
+      <span class="yll-wordbook-icon">▣</span>
+      <span class="yll-wordbook-name">${escapeHtml(options.name)}</span>
+      <span class="yll-wordbook-count">${options.count}/${total}</span>
+      <span class="yll-wordbook-progress-track"><span class="yll-wordbook-progress-bar" style="--yll-wordbook-progress:${progress}%"></span></span>
+      <span class="yll-wordbook-arrow">›</span>
+    </button>
   `;
 }
 
@@ -5484,11 +5626,18 @@ function readTextTrackRows() {
 }
 
 function isLikelyCompleteTextTrackRows(rows: LabCue[]) {
-  if (rows.length < 8) return false;
+  if (rows.length < 3) return false;
   const video = getMainVideo();
   const durationMs = video?.duration && Number.isFinite(video.duration) ? video.duration * 1000 : 0;
-  if (!durationMs || durationMs < 90000) return rows.length >= 8;
+  if (!durationMs || durationMs < 90000) return rows.length >= 3;
+  const currentMs = video && Number.isFinite(video.currentTime) ? video.currentTime * 1000 : 0;
+  const firstStartMs = rows.reduce((min, cue) => Math.min(min, cue.startMs), Number.POSITIVE_INFINITY);
   const lastEndMs = rows.reduce((max, cue) => Math.max(max, cue.startMs + cue.durationMs), 0);
+  const coversCurrentSegment =
+    Number.isFinite(firstStartMs) &&
+    firstStartMs <= currentMs + 20000 &&
+    lastEndMs >= Math.max(0, currentMs - 1500);
+  if (coversCurrentSegment && rows.length >= 3) return true;
   const coverageRatio = lastEndMs / durationMs;
   const enoughRowsForLongVideo = rows.length >= Math.min(80, Math.max(18, Math.floor(durationMs / 45000)));
   return coverageRatio >= 0.55 && enoughRowsForLongVideo;

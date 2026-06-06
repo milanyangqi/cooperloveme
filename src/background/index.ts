@@ -9,6 +9,7 @@ import {
   getAdminUserDetail,
   listAdminUsers,
   loadRemoteAccount,
+  loadRemoteAccountWithFallback,
   saveAdminEntitlementOverride,
   signInWithEmail,
   signUpWithEmail
@@ -28,6 +29,10 @@ chrome.runtime.onInstalled.addListener(() => {
   void ensureLocalUser();
 });
 
+chrome.action.onClicked.addListener((tab) => {
+  void handleActionClick(tab);
+});
+
 chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendResponse) => {
   handleMessage(message, sender)
     .then((data) => sendResponse({ ok: true, data } satisfies RuntimeResponse))
@@ -40,6 +45,74 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendRespo
 
   return true;
 });
+
+async function handleActionClick(tab: chrome.tabs.Tab): Promise<void> {
+  if (!tab.id || !tab.url) {
+    await chrome.runtime.openOptionsPage();
+    return;
+  }
+
+  const parsed = new URL(tab.url);
+  if (!parsed.hostname.includes("youtube.com")) {
+    await chrome.runtime.openOptionsPage();
+    return;
+  }
+
+  await ensureCurrentContentScript(tab.id);
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.dispatchEvent(new Event("yll-toggle-popup-dock"))
+  });
+}
+
+async function ensureCurrentContentScript(tabId: number): Promise<void> {
+  const expectedVersion = chrome.runtime.getManifest().version;
+  const [probe] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (version: string) => {
+      const page = window as Window & {
+        __yllSafeScriptVersion?: string;
+        __yllSafeStopCurrentScript?: () => void;
+      };
+      return page.__yllSafeScriptVersion === version;
+    },
+    args: [expectedVersion]
+  });
+
+  if (probe?.result) return;
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const page = window as Window & {
+        __yllSafeStopCurrentScript?: () => void;
+        __yllSafeTimer?: number;
+        __yllSafeOverlayTimer?: number;
+        __yllSafeOfficialRetryTimer?: number;
+      };
+      page.__yllSafeStopCurrentScript?.();
+      if (page.__yllSafeTimer) window.clearInterval(page.__yllSafeTimer);
+      if (page.__yllSafeOverlayTimer) window.clearInterval(page.__yllSafeOverlayTimer);
+      if (page.__yllSafeOfficialRetryTimer) window.clearTimeout(page.__yllSafeOfficialRetryTimer);
+      [
+        "yll-lab-panel-v2",
+        "yll-lab-overlay-v2",
+        "yll-lab-word-popover-v2",
+        "yll-lab-settings-v2",
+        "yll-lab-practice-v2",
+        "yll-lab-library-v2",
+        "yll-lab-debug-v2",
+        "yll-lab-popup-dock-v2",
+        "yll-lab-style-v2"
+      ].forEach((id) => document.getElementById(id)?.remove());
+      document.documentElement.classList.remove("yll-hide-native-captions");
+    }
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["assets/content.js"]
+  });
+}
 
 async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
   switch (message.type) {
@@ -83,7 +156,7 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
         loadSecrets(),
         loadEntitlement(localUser.id),
         loadLibrary(localUser.id),
-        loadRemoteAccount()
+        loadRemoteAccountWithFallback()
       ]);
 
       return {

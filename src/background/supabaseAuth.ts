@@ -12,6 +12,7 @@ import type {
 } from "../shared/types";
 
 const SESSION_KEY = "supabaseSession";
+const ACCOUNT_CACHE_KEY = "supabaseAccountCache";
 const REFRESH_SKEW_SECONDS = 90;
 
 interface StoredSupabaseSession {
@@ -71,6 +72,15 @@ async function saveSession(session: StoredSupabaseSession): Promise<void> {
   await chrome.storage.local.set({ [SESSION_KEY]: session });
 }
 
+async function saveAccountCache(snapshot: RemoteAccountSnapshot): Promise<void> {
+  if (snapshot.auth.status !== "signed-in") return;
+  await chrome.storage.local.set({ [ACCOUNT_CACHE_KEY]: snapshot });
+}
+
+async function loadAccountCache(): Promise<RemoteAccountSnapshot | undefined> {
+  return storageGet<RemoteAccountSnapshot>(ACCOUNT_CACHE_KEY);
+}
+
 export async function clearSupabaseSession(): Promise<RemoteAuthSnapshot> {
   const session = await storageGet<StoredSupabaseSession>(SESSION_KEY);
 
@@ -81,7 +91,7 @@ export async function clearSupabaseSession(): Promise<RemoteAuthSnapshot> {
     }).catch(() => undefined);
   }
 
-  await chrome.storage.local.remove(SESSION_KEY);
+  await chrome.storage.local.remove([SESSION_KEY, ACCOUNT_CACHE_KEY]);
   return { status: "anonymous" };
 }
 
@@ -115,7 +125,60 @@ export async function signInWithEmail(credentials: EmailPasswordCredentials): Pr
 
   const session = toStoredSession(response);
   await saveSession(session);
-  return sessionSnapshot(session, response.user);
+  const auth = sessionSnapshot(session, response.user);
+  if (auth.user) {
+    await saveAccountCache({ auth, user: auth.user });
+  }
+  return auth;
+}
+
+export async function loadRemoteAccountWithFallback(timeoutMs = 2200): Promise<RemoteAccountSnapshot> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<"timeout">((resolve) => {
+    timeoutId = globalThis.setTimeout(() => resolve("timeout"), timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([loadRemoteAccount(), timeout]);
+    if (timeoutId) globalThis.clearTimeout(timeoutId);
+    if (result !== "timeout") return result;
+  } catch (error) {
+    if (timeoutId) globalThis.clearTimeout(timeoutId);
+    const cached = await loadAccountCache();
+    if (cached?.auth.status === "signed-in") {
+      return {
+        ...cached,
+        auth: {
+          ...cached.auth,
+          lastError: error instanceof Error ? error.message : "远端账号读取失败，先使用上次登录状态。"
+        }
+      };
+    }
+    return {
+      auth: {
+        status: "anonymous",
+        lastError: error instanceof Error ? error.message : "远端账号读取失败。"
+      }
+    };
+  }
+
+  const cached = await loadAccountCache();
+  if (cached?.auth.status === "signed-in") {
+    return {
+      ...cached,
+      auth: {
+        ...cached.auth,
+        lastError: "远端账号读取较慢，先使用上次登录状态。"
+      }
+    };
+  }
+
+  return {
+    auth: {
+      status: "anonymous",
+      lastError: "远端账号读取较慢，请稍后刷新。"
+    }
+  };
 }
 
 export async function loadRemoteAccount(): Promise<RemoteAccountSnapshot> {
@@ -131,7 +194,7 @@ export async function loadRemoteAccount(): Promise<RemoteAccountSnapshot> {
   });
 
   if (response.status === 401) {
-    await chrome.storage.local.remove(SESSION_KEY);
+    await chrome.storage.local.remove([SESSION_KEY, ACCOUNT_CACHE_KEY]);
     return {
       auth: {
         status: "anonymous",
@@ -142,6 +205,16 @@ export async function loadRemoteAccount(): Promise<RemoteAccountSnapshot> {
 
   if (!response.ok) {
     const detail = await readError(response);
+    const cached = await loadAccountCache();
+    if (cached?.auth.status === "signed-in") {
+      return {
+        ...cached,
+        auth: {
+          ...cached.auth,
+          lastError: detail
+        }
+      };
+    }
     return {
       auth: {
         status: "anonymous",
@@ -151,7 +224,7 @@ export async function loadRemoteAccount(): Promise<RemoteAccountSnapshot> {
   }
 
   const data = (await response.json()) as RemoteMeResponse;
-  return {
+  const snapshot: RemoteAccountSnapshot = {
     auth: {
       status: "signed-in",
       user: data.user,
@@ -160,6 +233,8 @@ export async function loadRemoteAccount(): Promise<RemoteAccountSnapshot> {
     user: data.user,
     entitlement: data.entitlement
   };
+  await saveAccountCache(snapshot);
+  return snapshot;
 }
 
 export async function createBillingCheckout(): Promise<{ url: string }> {
@@ -244,7 +319,6 @@ async function ensureFreshSession(): Promise<StoredSupabaseSession | undefined> 
     await saveSession(refreshed);
     return refreshed;
   } catch {
-    await chrome.storage.local.remove(SESSION_KEY);
     return undefined;
   }
 }

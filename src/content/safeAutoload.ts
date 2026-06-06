@@ -117,6 +117,7 @@ const SETTINGS_PANEL_ID = "yll-lab-settings-v2";
 const PRACTICE_ID = "yll-lab-practice-v2";
 const DEBUG_PANEL_ID = "yll-lab-debug-v2";
 const LIBRARY_PANEL_ID = "yll-lab-library-v2";
+const POPUP_DOCK_ID = "yll-lab-popup-dock-v2";
 const OLD_PANEL_ID = "yll-safe-panel";
 const OLD_OVERLAY_ID = "yll-safe-overlay";
 const OLD_WORD_POPOVER_ID = "yll-safe-word-popover";
@@ -125,7 +126,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.123";
+const SCRIPT_VERSION = "0.1.124";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -279,6 +280,7 @@ function stopCurrentScriptInstance() {
   document.getElementById(PRACTICE_ID)?.remove();
   document.getElementById(DEBUG_PANEL_ID)?.remove();
   document.getElementById(LIBRARY_PANEL_ID)?.remove();
+  document.getElementById(POPUP_DOCK_ID)?.remove();
   document.getElementById(STYLE_ID)?.remove();
   document.documentElement.classList.remove("yll-hide-native-captions");
 }
@@ -735,6 +737,57 @@ function installStyle() {
       contain: layout paint style;
       display: flex;
       flex-direction: column;
+    }
+    #${POPUP_DOCK_ID} {
+      position: fixed;
+      right: 402px;
+      top: 76px;
+      z-index: 2147483647;
+      width: 460px;
+      height: clamp(520px, calc(100dvh - 92px), 1040px);
+      overflow: hidden;
+      background: #0c0d0e;
+      color: #f7f8f8;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 8px;
+      box-shadow: 0 16px 42px rgba(0,0,0,.34);
+      font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      contain: layout paint style;
+    }
+    #${POPUP_DOCK_ID} iframe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #0c0d0e;
+    }
+    #${POPUP_DOCK_ID} .yll-popup-dock-close {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      z-index: 1;
+      width: 30px;
+      height: 30px;
+      color: #a3aab5;
+      background: #202326;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    #${POPUP_DOCK_ID} .yll-popup-dock-close:hover,
+    #${POPUP_DOCK_ID} .yll-popup-dock-close:focus {
+      color: #17191b;
+      background: #f4f5f5;
+      outline: none;
+    }
+    @media (max-width: 920px) {
+      #${POPUP_DOCK_ID} {
+        left: 16px;
+        right: auto;
+        width: min(460px, calc(100vw - 32px));
+      }
     }
     #${PANEL_ID} * { box-sizing: border-box; }
     #${PANEL_ID} .yll-head {
@@ -1451,6 +1504,43 @@ function mountPanel() {
   return panel;
 }
 
+function openPopupDock() {
+  removeLegacyContentApp();
+  installStyle();
+  const existing = document.getElementById(POPUP_DOCK_ID);
+  if (existing?.getAttribute("data-yll-version") === SCRIPT_VERSION) return existing;
+  existing?.remove();
+
+  const dock = document.createElement("aside");
+  dock.id = POPUP_DOCK_ID;
+  dock.setAttribute("data-yll-version", SCRIPT_VERSION);
+
+  const closeButton = document.createElement("button");
+  closeButton.className = "yll-popup-dock-close";
+  closeButton.type = "button";
+  closeButton.setAttribute("aria-label", "关闭 YouTube Language Lab");
+  closeButton.textContent = "×";
+  closeButton.addEventListener("click", () => dock.remove());
+
+  const iframe = document.createElement("iframe");
+  iframe.title = "YouTube Language Lab";
+  iframe.src = chrome.runtime.getURL(`popup.html?dock=1&v=${SCRIPT_VERSION}`);
+  iframe.setAttribute("allow", "microphone");
+
+  dock.append(closeButton, iframe);
+  document.documentElement.appendChild(dock);
+  return dock;
+}
+
+function togglePopupDock() {
+  const existing = document.getElementById(POPUP_DOCK_ID);
+  if (existing?.getAttribute("data-yll-version") === SCRIPT_VERSION) {
+    existing.remove();
+    return;
+  }
+  openPopupDock();
+}
+
 function bindCaptionListScrollState(list: HTMLElement | null) {
   if (!list) return;
   const markManualScroll = () => {
@@ -1540,13 +1630,17 @@ function debugSnapshot() {
   };
 }
 
-async function toggleLibraryPanel() {
+async function toggleLibraryPanel(options: { forceOpen?: boolean } = {}) {
   const now = Date.now();
   if (runtime.__yllSafeLastLibraryToggleAt && now - runtime.__yllSafeLastLibraryToggleAt < 350) return;
   runtime.__yllSafeLastLibraryToggleAt = now;
 
   const existing = document.getElementById(LIBRARY_PANEL_ID);
   if (existing) {
+    if (options.forceOpen) {
+      runtime.__yllSafeLibraryOpen = true;
+      return;
+    }
     runtime.__yllSafeLibraryOpen = false;
     existing.remove();
     return;
@@ -4628,6 +4722,16 @@ window.addEventListener("yll-open-practice", () => {
     return;
   }
   openPracticeOverlay();
+});
+window.addEventListener("yll-open-library", () => {
+  mountPanel();
+  void toggleLibraryPanel({ forceOpen: true });
+});
+window.addEventListener("yll-open-popup-dock", () => {
+  openPopupDock();
+});
+window.addEventListener("yll-toggle-popup-dock", () => {
+  togglePopupDock();
 });
 window.addEventListener("yll-safe-reload", () => {
   if (runtime.__yllSafeOverlayTimer) window.clearInterval(runtime.__yllSafeOverlayTimer);

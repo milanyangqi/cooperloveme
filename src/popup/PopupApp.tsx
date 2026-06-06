@@ -98,6 +98,7 @@ const PLAYBACK_RATE_OPTIONS = [
 ];
 
 export function PopupApp() {
+  const isDocked = new URLSearchParams(location.search).get("dock") === "1";
   const [status, setStatus] = useState("自动模式：YouTube 视频页会加载新版轻量字幕面板。");
   const [bootstrap, setBootstrap] = useState<PopupBootstrap | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<ExtensionSettings | null>(null);
@@ -107,6 +108,11 @@ export function PopupApp() {
   const [activeView, setActiveView] = useState<PopupView>("home");
 
   const syncPopupHeightWithCaptionPanel = async () => {
+    if (isDocked) {
+      document.documentElement.style.setProperty("--yll-popup-height", "100dvh");
+      return;
+    }
+
     const applyHeight = (viewportHeight: number) => {
       if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return;
       const panelHeight = Math.min(
@@ -146,9 +152,13 @@ export function PopupApp() {
   };
 
   useEffect(() => {
+    document.documentElement.classList.toggle("yll-dock-popup", isDocked);
     void reloadBootstrap();
     void syncPopupHeightWithCaptionPanel();
-  }, []);
+    return () => {
+      document.documentElement.classList.remove("yll-dock-popup");
+    };
+  }, [isDocked]);
 
   const wakeSafeContentScript = async (message: string) => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -356,6 +366,39 @@ export function PopupApp() {
     await chrome.runtime.openOptionsPage();
   };
 
+  const dispatchActiveYouTubeEvent = async (eventName: string) => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url) return false;
+
+    const parsed = new URL(tab.url);
+    if (!parsed.hostname.includes("youtube.com")) return false;
+
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (name: string) => {
+        window.dispatchEvent(new Event(name));
+        return true;
+      },
+      args: [eventName]
+    });
+    return Boolean(result?.result);
+  };
+
+  const openLearningLibrary = async () => {
+    try {
+      setStatus("正在打开学习库...");
+      const opened = await dispatchActiveYouTubeEvent("yll-open-library");
+      if (opened) {
+        setStatus("学习库已打开。");
+        return;
+      }
+      await openOptions();
+      setStatus("已打开选项页。");
+    } catch (error) {
+      setStatus(error instanceof Error ? `学习库打开失败：${error.message}` : "学习库打开失败。");
+    }
+  };
+
   const startBilling = async () => {
     const response = await sendRuntimeMessage<{ url: string }>({ type: "START_BILLING_CHECKOUT" });
     if (!response.ok) {
@@ -448,9 +491,9 @@ export function PopupApp() {
               </section>
 
               <section className="feature-grid">
-                <FeatureCard icon={<BookOpen size={18} />} label="生词" value={vocabCount} onClick={openOptions} />
-                <FeatureCard icon={<CheckCircle2 size={18} />} label="已掌握" value={masteredCount} onClick={openOptions} />
-                <FeatureCard icon={<BookMarked size={18} />} label="例句库" value={sentenceCount} onClick={openOptions} />
+                <FeatureCard icon={<BookOpen size={18} />} label="生词" value={vocabCount} onClick={openLearningLibrary} />
+                <FeatureCard icon={<CheckCircle2 size={18} />} label="已掌握" value={masteredCount} onClick={openLearningLibrary} />
+                <FeatureCard icon={<BookMarked size={18} />} label="例句库" value={sentenceCount} onClick={openLearningLibrary} />
                 <FeatureCard icon={<Dumbbell size={18} />} label="混合练习" value={practiceCount} onClick={openPractice} />
                 <FeatureCard icon={<FileText size={18} />} label="PDF 翻译" value="beta" onClick={openOptions} />
               </section>
@@ -482,7 +525,7 @@ export function PopupApp() {
                 {recentVocab.length ? (
                   <div className="word-list">
                     {recentVocab.map((item, index) => (
-                      <button key={`${item.text ?? "word"}-${index}`} type="button" onClick={openOptions}>
+                      <button key={`${item.text ?? "word"}-${index}`} type="button" onClick={openLearningLibrary}>
                         <span>
                           <strong>{item.text ?? "未命名单词"}</strong>
                           <small>{item.meaning ?? "释义待补充"}</small>
@@ -499,7 +542,7 @@ export function PopupApp() {
                   </div>
                 )}
                 {recentSentences.length ? (
-                  <button className="sentence-preview-link" type="button" onClick={openOptions}>
+                  <button className="sentence-preview-link" type="button" onClick={openLearningLibrary}>
                     查看 {recentSentences.length} 条最近收藏句
                     <ChevronRight size={15} />
                   </button>
@@ -575,8 +618,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.123 待审核</strong>
-              <p>弹窗高度跟随字幕面板，并修复播放速度即时应用。</p>
+              <strong>0.1.124 待审核</strong>
+              <p>插件图标改为页面内高容器，并修复账号加载和词本入口。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -625,7 +668,7 @@ export function PopupApp() {
                   checked={settings.enabled}
                   onChange={(checked) => void updateSettings({ enabled: checked })}
                 />
-                {isSignedIn ? <ActionSetting icon={<BookMarked size={17} />} label="词本管理" value={`${vocabCount} 个生词`} onClick={openOptions} /> : null}
+                {isSignedIn ? <ActionSetting icon={<BookMarked size={17} />} label="词本管理" value={`${vocabCount} 个生词`} onClick={openLearningLibrary} /> : null}
               </SettingsSection>
 
               <SettingsSection title="语言设置" accent>

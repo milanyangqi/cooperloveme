@@ -45,16 +45,22 @@ type PopupBootstrap = {
   };
 };
 
-type PopupView = "home" | "settings" | "account";
+type PopupView = "home" | "settings" | "account" | "library";
 
 type VocabPreview = {
   id?: string;
+  wordbookId?: string;
   text?: string;
   normalizedText?: string;
   meaning?: string;
   mastery?: number;
   sourceSentence?: string;
   translatedSentence?: string;
+};
+
+type WordbookPreview = {
+  id?: string;
+  name?: string;
 };
 
 type SentencePreview = {
@@ -135,6 +141,7 @@ export function PopupApp() {
   const [previewTab, setPreviewTab] = useState<PreviewTab>("page");
   const [pageWords, setPageWords] = useState<PageWord[]>([]);
   const [wordActionBusy, setWordActionBusy] = useState("");
+  const [libraryWordbookId, setLibraryWordbookId] = useState("");
 
   const syncPopupHeightWithCaptionPanel = async () => {
     if (isDocked) {
@@ -189,8 +196,13 @@ export function PopupApp() {
     document.documentElement.classList.toggle("yll-dock-popup", isDocked);
     void reloadBootstrap();
     void syncPopupHeightWithCaptionPanel();
+    const handleRuntimeMessage = (message: { type?: string }) => {
+      if (message?.type === "LIBRARY_UPDATED") void reloadBootstrap();
+    };
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
     return () => {
       document.documentElement.classList.remove("yll-dock-popup");
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     };
   }, [isDocked]);
 
@@ -430,18 +442,9 @@ export function PopupApp() {
   };
 
   const openLearningLibrary = async () => {
-    try {
-      setStatus("正在打开学习库...");
-      const opened = await dispatchActiveYouTubeEvent("yll-open-library");
-      if (opened) {
-        setStatus("学习库已打开。");
-        return;
-      }
-      await openOptions();
-      setStatus("已打开选项页。");
-    } catch (error) {
-      setStatus(error instanceof Error ? `学习库打开失败：${error.message}` : "学习库打开失败。");
-    }
+    setActiveView("library");
+    setStatus("学习库已打开。");
+    await reloadBootstrap();
   };
 
   const startBilling = async () => {
@@ -510,6 +513,15 @@ export function PopupApp() {
         setStatus(response.error);
         return;
       }
+      setBootstrap((current) => {
+        if (!current) return current;
+        const nextItem = response.data;
+        const vocabItems = current.library.vocabItems as VocabPreview[];
+        const nextItems = vocabItems.some((item) => item.id === nextItem.id)
+          ? vocabItems.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item))
+          : [nextItem, ...vocabItems];
+        return { ...current, library: { ...current.library, vocabItems: nextItems } };
+      });
       setStatus(message);
       await reloadBootstrap();
       await refreshPageWords();
@@ -549,6 +561,7 @@ export function PopupApp() {
   const sentenceCount = bootstrap?.library.sentenceNotes.length ?? 0;
   const practiceCount = bootstrap?.library.practiceAttempts.length ?? 0;
   const vocabItems = (bootstrap?.library.vocabItems as VocabPreview[] | undefined) ?? [];
+  const wordbooks = (bootstrap?.library.wordbooks as WordbookPreview[] | undefined) ?? [];
   const sentenceNotes = (bootstrap?.library.sentenceNotes as SentencePreview[] | undefined) ?? [];
   const masteredCount = vocabItems.filter((item) => item.mastery && item.mastery >= 4).length;
   const recentSentences = sentenceNotes.slice(0, 4);
@@ -567,6 +580,8 @@ export function PopupApp() {
     .filter((word) => normalizePreviewWord(word.text));
   const pageNewWords = currentPageWords.filter((word) => word.mastery < 4);
   const pageMasteredWords = currentPageWords.filter((word) => word.mastery >= 4);
+  const selectedLibraryWordbookId = libraryWordbookId || wordbooks[0]?.id || "";
+  const libraryWords = vocabItems.filter((item) => !selectedLibraryWordbookId || item.wordbookId === selectedLibraryWordbookId);
   const accountBadge = !bootstrap ? "LOADING" : isSignedIn ? "SIGNED IN" : "LOCAL";
   const settings = settingsDraft;
 
@@ -755,7 +770,7 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.134 待审核</strong>
+              <strong>0.1.135 待审核</strong>
               <p>修复设置页滚动，并新增 Supabase 学习数据同步。</p>
             </div>
             <span className="plan">
@@ -904,6 +919,57 @@ export function PopupApp() {
                 />
                 <ActionSetting icon={<Settings size={17} />} label="高级设置" value="选项页" onClick={openOptions} />
               </SettingsSection>
+            </>
+          )}
+        </section>
+      ) : activeView === "library" ? (
+        <section className="popup-library-view">
+          <div className="subpage-title">
+            <button type="button" onClick={() => setActiveView("home")}>
+              <ChevronRight size={17} />
+            </button>
+            <strong>学习库</strong>
+            <button type="button" onClick={() => setActiveView("home")}>
+              ×
+            </button>
+          </div>
+
+          {!bootstrap || !isSignedIn ? (
+            <div className="settings-loading">请先登录账号。</div>
+          ) : (
+            <>
+              <div className="library-toolbar">
+                <select value={selectedLibraryWordbookId} onChange={(event) => setLibraryWordbookId(event.target.value)}>
+                  {wordbooks.map((wordbook) => (
+                    <option key={wordbook.id ?? wordbook.name} value={wordbook.id ?? ""}>
+                      {wordbook.name ?? "默认词本"}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={syncLibrary}>同步</button>
+              </div>
+              <div className="library-summary">
+                <span>生词 {libraryWords.filter((item) => (item.mastery ?? 0) < 4).length}</span>
+                <span>已掌握 {libraryWords.filter((item) => (item.mastery ?? 0) >= 4).length}</span>
+                <span>收藏句 {sentenceCount}</span>
+              </div>
+              <div className="popup-library-list">
+                {libraryWords.length ? libraryWords.map((item) => (
+                  <div className="popup-library-row" key={item.id ?? item.text}>
+                    <span>
+                      <strong>{item.text ?? "未命名单词"}</strong>
+                      <small>{item.meaning ?? item.sourceSentence ?? "释义待补充"}</small>
+                    </span>
+                    <em>{(item.mastery ?? 0) >= 4 ? "已掌握" : "生词"}</em>
+                  </div>
+                )) : (
+                  <div className="empty-preview">
+                    <CircleAlert size={18} />
+                    <span>当前词本还没有单词。</span>
+                  </div>
+                )}
+              </div>
+              <button className="detail-action" type="button" onClick={openPractice}>打开混合练习</button>
             </>
           )}
         </section>

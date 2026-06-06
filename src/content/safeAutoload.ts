@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.134";
+const SCRIPT_VERSION = "0.1.135";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -244,6 +244,7 @@ const runtime = window as typeof window & {
   __yllSafeSignedIn?: boolean;
   __yllSafeAuthCheckedAt?: number;
   __yllSafePanelDismissedVideoId?: string;
+  __yllSafeForceNextOfficialLoadReason?: string;
   __yllSafeWordLookupCache?: Map<string, string>;
   __yllSafeWordLookupPending?: Map<string, Promise<string | undefined>>;
   __yllTimedTextBridgeListening?: boolean;
@@ -1907,10 +1908,7 @@ function mountLibraryPanelElement() {
 }
 
 function ensureLibraryPanelVisible() {
-  if (!runtime.__yllSafeLibraryOpen) return;
-  document.getElementById(PANEL_ID)?.classList.add("yll-library-open");
-  if (document.getElementById(LIBRARY_PANEL_ID) || runtime.__yllSafeLibraryLoading) return;
-  void openLibraryPanel();
+  closeLibraryPanel();
 }
 
 function closeLibraryPanel() {
@@ -5386,7 +5384,9 @@ function tick() {
       addDebugLog("ad:resume-subtitles", { videoId: currentVideoId, rows: runtime.__yllSafeRows?.length ?? 0 });
       setStatus("广告已结束，字幕同步继续。");
     }
-    void loadRowsForCurrentVideo().catch((error) => {
+    const forceOfficialLoadReason = runtime.__yllSafeForceNextOfficialLoadReason;
+    runtime.__yllSafeForceNextOfficialLoadReason = undefined;
+    void loadRowsForCurrentVideo(forceOfficialLoadReason ? { force: true, reason: forceOfficialLoadReason } : undefined).catch((error) => {
       runtime.__yllSafeIsLoadingOfficial = false;
       runtime.__yllSafeLoadingVideoId = undefined;
       runtime.__yllSafeCanUseVisibleFallback = true;
@@ -5430,8 +5430,8 @@ window.addEventListener("yll-open-practice", () => {
 window.addEventListener("yll-open-library", () => {
   void requireSignedInFeature("学习库").then((allowed) => {
     if (!allowed) return;
-    mountPanel();
-    void toggleLibraryPanel({ forceOpen: true });
+    closeLibraryPanel();
+    openPopupDock();
   });
 });
 window.addEventListener("yll-open-popup-dock", () => {
@@ -5464,6 +5464,7 @@ window.addEventListener("yll-safe-reload", () => {
   runtime.__yllSafeLastOfficialAttemptAt = undefined;
   runtime.__yllSafeOfficialAttemptCount = undefined;
   runtime.__yllSafeLastOfficialDebug = undefined;
+  runtime.__yllSafeForceNextOfficialLoadReason = "manual-reload";
   runtime.__yllSafeWasAdShowing = false;
   runtime.__yllSafePanelDismissedVideoId = undefined;
   document.getElementById(WORD_POPOVER_ID)?.remove();
@@ -5472,7 +5473,7 @@ window.addEventListener("yll-safe-reload", () => {
   renderRows([]);
   setOverlayCue(undefined);
   start();
-  ensureLibraryPanelVisible();
+  setCaptionStatus("正在强制重读官方字幕轨道...", "官方字幕轨道");
 });
 window.setTimeout(start, 0);
 window.setTimeout(start, 900);

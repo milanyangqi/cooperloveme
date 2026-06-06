@@ -213,8 +213,11 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
     case "GET_LIBRARY":
       return loadLibrary(localUser.id);
 
-    case "SYNC_LIBRARY":
-      return syncLearningData(localUser.id);
+    case "SYNC_LIBRARY": {
+      const result = await syncLearningData(localUser.id);
+      notifyLibraryChanged();
+      return result;
+    }
 
     case "CREATE_WORDBOOK":
       return createWordbook(localUser.id, message.payload.name, message.payload.description);
@@ -240,6 +243,7 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       };
       const saved = await putRecord("sentenceNotes", note);
       await syncRecordIfEnabled("sentenceNotes", saved);
+      notifyLibraryChanged();
       return saved;
     }
 
@@ -261,6 +265,7 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       };
       const saved = await putRecord("vocabItems", item);
       await syncRecordIfEnabled("vocabItems", saved);
+      notifyLibraryChanged();
       return saved;
     }
 
@@ -298,6 +303,7 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
         await syncRecordIfEnabled("vocabItems", saved);
       }
 
+      if (imported.length) notifyLibraryChanged();
       return { imported: imported.length, items: imported };
     }
 
@@ -311,6 +317,7 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       };
       const saved = await putRecord("practiceAttempts", attempt);
       await syncRecordIfEnabled("practiceAttempts", saved);
+      notifyLibraryChanged();
       return saved;
     }
 
@@ -876,6 +883,7 @@ async function createWordbook(userId: string, name: string, description?: string
   };
   const saved = await putRecord("wordbooks", wordbook);
   await syncRecordIfEnabled("wordbooks", saved);
+  notifyLibraryChanged();
   return saved;
 }
 
@@ -884,6 +892,7 @@ async function deleteVocabItem(userId: string, id: string): Promise<{ deleted: b
   if (!item || item.userId !== userId) return { deleted: false };
   await deleteRecord("vocabItems", id);
   await deleteRemoteRecordIfEnabled("yll_vocab_items", id);
+  notifyLibraryChanged();
   return { deleted: true };
 }
 
@@ -898,6 +907,7 @@ async function updateVocabMastery(userId: string, id: string, mastery: VocabItem
   };
   const saved = await putRecord("vocabItems", updated);
   await syncRecordIfEnabled("vocabItems", saved);
+  notifyLibraryChanged();
   return saved;
 }
 
@@ -941,7 +951,12 @@ async function upsertVocabMastery(
   };
   const saved = await putRecord("vocabItems", item);
   await syncRecordIfEnabled("vocabItems", saved);
+  notifyLibraryChanged();
   return saved;
+}
+
+function notifyLibraryChanged(): void {
+  chrome.runtime.sendMessage({ type: "LIBRARY_UPDATED" }).catch(() => undefined);
 }
 
 type SyncableStoreName = "wordbooks" | "vocabItems" | "sentenceNotes" | "practiceAttempts";

@@ -583,12 +583,12 @@ export function PopupApp() {
   };
 
   const syncLibrary = async () => {
-    const confirmed = window.confirm("确认将本地词本、生词、收藏句、练习记录和设置上传同步到 Supabase？");
+    const confirmed = window.confirm("确认将本地词本、生词、收藏句、练习记录和设置上传到云端？");
     if (!confirmed) {
-      setStatus("已取消 Supabase 同步。");
+      setStatus("已取消云端同步。");
       return;
     }
-    setStatus("正在同步学习数据到 Supabase...");
+    setStatus("正在上传学习数据到云端...");
     const response = await sendRuntimeMessage<{ synced: number; failed: number }>({ type: "SYNC_LIBRARY" });
     if (!response.ok) {
       setStatus(response.error);
@@ -602,19 +602,19 @@ export function PopupApp() {
   };
 
   const pullLibrary = async () => {
-    const confirmed = window.confirm("确认从 Supabase 拉取学习数据到本地？同 ID 的本地记录会被云端记录更新。");
+    const confirmed = window.confirm("确认从云端同步学习数据到本地？同 ID 的本地记录会被云端记录更新。");
     if (!confirmed) {
-      setStatus("已取消从 Supabase 拉取。");
+      setStatus("已取消从云端同步。");
       return;
     }
-    setStatus("正在从 Supabase 拉取学习数据...");
+    setStatus("正在从云端同步学习数据...");
     const response = await sendRuntimeMessage<{ pulled: number; failed: number }>({ type: "PULL_LIBRARY" });
     if (!response.ok) {
       setStatus(response.error);
       window.alert(response.error);
       return;
     }
-    const message = response.data.failed ? `拉取完成：${response.data.pulled} 条成功，${response.data.failed} 个表失败。` : `已从 Supabase 拉取 ${response.data.pulled} 条学习数据。`;
+    const message = response.data.failed ? `云端同步完成：${response.data.pulled} 条成功，${response.data.failed} 个表失败。` : `已从云端同步 ${response.data.pulled} 条学习数据。`;
     setStatus(message);
     window.alert(message);
     await reloadBootstrap();
@@ -995,32 +995,6 @@ export function PopupApp() {
             </section>
           ) : null}
 
-          <div className="action-grid">
-            <button type="button" onClick={runSafePageProbe}>
-              <BookOpen size={17} />
-              检测页面
-            </button>
-            <button type="button" onClick={mountMiniPanel}>
-              <BookOpen size={17} />
-              唤醒面板
-            </button>
-            <button type="button" onClick={loadMiniCaptions}>
-              <BookOpen size={17} />
-              重读字幕
-            </button>
-          </div>
-
-          <section className="account-card">
-            <div>
-              <span className="label">当前版本</span>
-              <strong>0.1.144 待审核</strong>
-              <p>修复混合练习入口，增强官方字幕保护和字幕样式。</p>
-            </div>
-            <span className="plan">
-              <ShieldCheck size={13} />
-              SAFE
-            </span>
-          </section>
         </>
       ) : activeView === "siteAccess" ? (
         <section className="site-access-view">
@@ -1113,7 +1087,7 @@ export function PopupApp() {
               <SettingsSection title="账号" accent>
                 <ActionSetting
                   icon={<UserRound size={17} />}
-                  label={isSignedIn ? bootstrap.user.email ?? bootstrap.user.displayName ?? "Supabase 用户" : "本地匿名"}
+                  label={isSignedIn ? bootstrap.user.email ?? bootstrap.user.displayName ?? "云端用户" : "本地匿名"}
                   value={isSignedIn ? bootstrap.entitlement.plan.toUpperCase() : "LOCAL"}
                   onClick={isSignedIn ? () => setActiveView("account") : () => setActiveView("home")}
                 />
@@ -1211,13 +1185,13 @@ export function PopupApp() {
                   />
                   <ActionSetting
                     icon={<ShieldCheck size={17} />}
-                    label="立即同步到 Supabase"
+                    label="立即同步到云端"
                     value="上传学习数据"
                     onClick={syncLibrary}
                   />
                   <ActionSetting
                     icon={<Download size={17} />}
-                    label="从 Supabase 同步到本地"
+                    label="从云端同步到本地"
                     value="拉取云端数据"
                     onClick={pullLibrary}
                   />
@@ -1493,7 +1467,7 @@ function uniqueWordbookPreviews(wordbooks: WordbookPreview[]): WordbookPreview[]
 }
 
 function previewEmptyText(tab: PreviewTab, totalPageWords: number): string {
-  if (tab === "page") return totalPageWords ? "本页单词都已掌握。" : "当前页还没有读取到字幕单词，请先点击重读字幕。";
+  if (tab === "page") return totalPageWords ? "本页单词都已掌握。" : "当前页还没有读取到字幕单词，请等待字幕自动加载或重新打开视频页。";
   if (tab === "mastered") return "本页还没有已掌握单词。";
   return "当前还没有收藏句。";
 }

@@ -31,6 +31,11 @@ import type {
 
 chrome.runtime.onInstalled.addListener(() => {
   void ensureLocalUser();
+  void wakeExistingYouTubeWatchTabs("installed");
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void wakeExistingYouTubeWatchTabs("startup");
 });
 
 chrome.action.onClicked.addListener((tab) => {
@@ -120,6 +125,31 @@ async function ensureCurrentContentScript(tabId: number): Promise<void> {
     target: { tabId },
     files: ["assets/content.js"]
   });
+}
+
+async function wakeExistingYouTubeWatchTabs(reason: string): Promise<void> {
+  const tabs = await chrome.tabs
+    .query({
+      url: ["https://www.youtube.com/watch*", "https://youtube.com/watch*"]
+    })
+    .catch(() => []);
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (!tab.id) return;
+      try {
+        await ensureCurrentContentScript(tab.id);
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (reloadReason: string) => {
+            window.dispatchEvent(new CustomEvent("yll-safe-reload", { detail: { reason: reloadReason } }));
+          },
+          args: [`auto-${reason}`]
+        });
+      } catch {
+        // Some YouTube tabs can be prerendered or unavailable during extension startup.
+      }
+    })
+  );
 }
 
 async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
@@ -1070,7 +1100,7 @@ async function syncLearningData(userId: string): Promise<{ synced: number; faile
   const settings = await loadSettings();
   if (!settings.syncEnabled) throw new Error("请先在设置中开启云同步。");
   const session = await getSupabaseDataSession();
-  if (!session) throw new Error("请先登录 Supabase 账号。");
+  if (!session) throw new Error("请先登录云端账号。");
 
   const library = await loadLibrary(userId);
   let synced = 0;
@@ -1100,7 +1130,7 @@ async function syncLearningData(userId: string): Promise<{ synced: number; faile
   }
 
   if (failed) {
-    throw new Error(`Supabase 同步失败：${synced} 条成功，${failed} 条失败。请确认云端学习数据表已部署。`);
+    throw new Error(`云端同步失败：${synced} 条成功，${failed} 条失败。请确认云端学习数据表已部署。`);
   }
   return { synced, failed };
 }
@@ -1109,7 +1139,7 @@ async function pullLearningData(userId: string): Promise<{ pulled: number; faile
   const settings = await loadSettings();
   if (!settings.syncEnabled) throw new Error("请先在设置中开启云同步。");
   const session = await getSupabaseDataSession();
-  if (!session) throw new Error("请先登录 Supabase 账号。");
+  if (!session) throw new Error("请先登录云端账号。");
 
   let pulled = 0;
   let failed = 0;
@@ -1149,7 +1179,7 @@ async function pullLearningData(userId: string): Promise<{ pulled: number; faile
     failed += 1;
   }
 
-  if (failed) throw new Error(`Supabase 拉取失败：已恢复 ${pulled} 条，${failed} 个数据表失败。`);
+  if (failed) throw new Error(`云端同步失败：已恢复 ${pulled} 条，${failed} 个数据表失败。`);
   return { pulled, failed };
 }
 
@@ -1214,7 +1244,7 @@ async function deleteRemoteRecordIfEnabled(table: string, localId: string): Prom
 async function upsertRemoteRows(table: string, rows: Array<Record<string, unknown>>): Promise<void> {
   if (!rows.length) return;
   const session = await getSupabaseDataSession();
-  if (!session) throw new Error("请先登录 Supabase 账号。");
+  if (!session) throw new Error("请先登录云端账号。");
   const userId = userIdFromAccessToken(session.accessToken);
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=user_id,local_id`, {
     method: "POST",
@@ -1228,10 +1258,10 @@ async function upsertRemoteRows(table: string, rows: Array<Record<string, unknow
 
 function userIdFromAccessToken(accessToken: string): string {
   const [, payload] = accessToken.split(".");
-  if (!payload) throw new Error("Supabase access token 无效。");
+  if (!payload) throw new Error("云端访问令牌无效。");
   const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
   const decoded = JSON.parse(atob(normalized)) as { sub?: string };
-  if (!decoded.sub) throw new Error("Supabase access token 缺少用户 ID。");
+  if (!decoded.sub) throw new Error("云端访问令牌缺少用户 ID。");
   return decoded.sub;
 }
 
@@ -1245,7 +1275,7 @@ function supabaseRestHeaders(accessToken: string, extra: HeadersInit = {}): Head
 
 async function readRestError(response: Response): Promise<string> {
   const data = (await response.json().catch(() => undefined)) as { message?: string; error?: string; details?: string } | undefined;
-  return data?.message ?? data?.error ?? data?.details ?? `Supabase REST failed: ${response.status}`;
+  return data?.message ?? data?.error ?? data?.details ?? `云端请求失败：${response.status}`;
 }
 
 function remoteTableForStore(storeName: SyncableStoreName): string {
@@ -1342,7 +1372,7 @@ async function guardQuota(userId: string, feature: UsageFeature, cost: number): 
   const entitlement = await loadEffectiveEntitlement(userId);
   if (entitlement.usageToday[feature] + cost > entitlement.quota[feature]) {
     await recordUsage(userId, feature, cost, "skipped");
-    throw new Error("免费额度已用尽。基础字幕和本地复习仍可使用；登录后可读取 Supabase Pro 权限。");
+    throw new Error("免费额度已用尽。基础字幕和本地复习仍可使用；登录后可读取云端 Pro 权限。");
   }
 }
 

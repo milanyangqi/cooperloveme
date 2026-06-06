@@ -120,7 +120,7 @@ export async function signInWithEmail(credentials: EmailPasswordCredentials): Pr
   });
 
   if (!response.access_token || !response.refresh_token) {
-    throw new Error("Supabase did not return a session.");
+    throw new Error("云端没有返回会话。");
   }
 
   const session = toStoredSession(response);
@@ -290,7 +290,7 @@ export function clearAdminEntitlementOverride(userId: string, reason?: string): 
 
 async function callAdmin<T>(payload: AdminFunctionRequest): Promise<T> {
   const session = await ensureFreshSession();
-  if (!session) throw new Error("请先登录 Supabase 账号。");
+  if (!session) throw new Error("请先登录云端账号。");
 
   const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/admin`, {
     method: "POST",
@@ -340,7 +340,7 @@ async function authRequest(path: string, init: RequestInit): Promise<SupabaseAut
 
   const data = (await response.json().catch(() => ({}))) as SupabaseAuthResponse;
   if (!response.ok) {
-    throw new Error(data.error_description ?? data.msg ?? data.error ?? `Supabase Auth failed: ${response.status}`);
+    throw new Error(data.error_description ?? data.msg ?? data.error ?? `云端认证失败：${response.status}`);
   }
 
   return data;
@@ -363,7 +363,7 @@ function normalizeCredentials(credentials: EmailPasswordCredentials): EmailPassw
 
 function toStoredSession(response: SupabaseAuthResponse): StoredSupabaseSession {
   if (!response.access_token || !response.refresh_token) {
-    throw new Error("Supabase did not return a session.");
+    throw new Error("云端没有返回会话。");
   }
 
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -386,7 +386,7 @@ function toUserProfile(user: SupabaseUser): UserProfile {
   return {
     id: user.id,
     email: user.email,
-    displayName: user.user_metadata?.name ?? user.user_metadata?.full_name ?? user.email ?? "Supabase 用户",
+    displayName: user.user_metadata?.name ?? user.user_metadata?.full_name ?? user.email ?? "云端用户",
     avatarUrl: user.user_metadata?.avatar_url,
     authProvider: user.app_metadata?.provider === "google" ? "google" : "email",
     createdAt: user.created_at
@@ -395,5 +395,5 @@ function toUserProfile(user: SupabaseUser): UserProfile {
 
 async function readError(response: Response): Promise<string> {
   const data = (await response.json().catch(() => undefined)) as { error?: string; message?: string } | undefined;
-  return data?.error ?? data?.message ?? `Supabase request failed: ${response.status}`;
+  return data?.error ?? data?.message ?? `云端请求失败：${response.status}`;
 }

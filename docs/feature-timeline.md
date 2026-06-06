@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 12:08:00 CST
+Last updated: 2026-06-07 12:42:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-07 12:08 CST | `0.1.144` documents the no-regression rule in `AGENTS.md`, allows temporary official `video.textTracks` rows when full tracks are late, and schedules forced official retries so full captionTracks/timedtext can still replace them | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-07 12:42 CST | `0.1.145` prevents temporary `video.textTracks 临时` rows from locking the official-caption path and auto-wakes existing YouTube watch tabs after extension install/startup | Needs Chrome timing review on fresh page load and after extension reload. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -36,7 +36,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Sentence save / collection | In Review | 2026-06-07 10:18 CST | `0.1.138` adds `收藏该句` on page-vocab rows so a word's source subtitle sentence can be collected directly | Needs extension reload and Chrome review. |
 | Vocabulary library | In Review | 2026-06-07 11:05 CST | `0.1.141` turns the learning-library summary blocks into selectable 生词 / 已掌握 / 收藏句 filters while preserving wordbook create/export/delete controls | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
-| Cloud sync | In Review | 2026-06-07 11:28 CST | `0.1.142` adds a Supabase-to-local pull action beside upload sync and keeps sync enabled by default | Needs extension reload and signed-in manual sync review. |
+| Cloud sync | In Review | 2026-06-07 12:42 CST | `0.1.145` keeps upload and pull actions but changes popup/options user-facing labels and errors to 云端 terminology | Needs extension reload and signed-in manual sync review. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Popup account login entry | In Review | 2026-06-06 19:57 CST | `0.1.126` keeps stale invalidated content scripts from refreshing overlays after extension reload | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
@@ -431,6 +431,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - popup mixed-practice actions now call the content script's direct `__yllSafeOpenPractice` entry before falling back to event dispatch
   - subtitle settings now include expanded font choices and color pickers for source text, translation text, current-word highlight, and subtitle background
   - partial official `video.textTracks` rows can display temporarily when full official tracks are late, while a forced official retry remains scheduled for full captionTracks/timedtext recovery
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.145` popup simplification, auto-wake, and cloud wording:
+  - removed the popup home-page manual action row (`检测页面`, `唤醒面板`, `重读字幕`) and the version status card
+  - background install/startup now auto-injects the current content script into existing YouTube watch tabs and dispatches a safe reload event so the panel/subtitles can load without manual popup actions
+  - temporary `video.textTracks 临时` rows no longer lock the official caption path; full official track retries can still replace temporary rows
+  - popup/options/background user-facing cloud-sync copy now says `云端` instead of exposing Supabase product text
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

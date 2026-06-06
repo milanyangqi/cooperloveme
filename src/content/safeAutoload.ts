@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.144";
+const SCRIPT_VERSION = "0.1.145";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -2015,7 +2015,7 @@ async function openLibraryPanel() {
   } catch (error) {
     const errorMessage = toErrorMessage(error);
     const message = isExtensionContextInvalidated(errorMessage)
-      ? "扩展上下文已过期。请打开 popup 并点击“唤醒面板”后再试。"
+      ? "扩展上下文已过期。请重新打开 YouTube 视频页后再试。"
       : `读取失败：${errorMessage}`;
     panel.innerHTML = `
       <div class="yll-library-head">
@@ -3615,8 +3615,8 @@ function renderRows(rows: LabCue[]) {
     const detail = isYouTubeAdShowing()
       ? "插件字幕会在广告结束后恢复，右侧列表暂时保持为空。"
       : runtime.__yllSafeIsLoadingOfficial
-        ? "正在等待 YouTube 字幕轨道返回；如果长时间没有结果，可以点击“重读字幕”。"
-        : "当前视频还没有加载到可用字幕。请确认视频有字幕轨，或稍后点击“重读字幕”。";
+        ? "正在等待 YouTube 字幕轨道返回；后台会继续自动重试。"
+        : "当前视频还没有加载到可用字幕。请确认视频有字幕轨，后台会继续自动重试。";
     list.innerHTML = `<div class="yll-empty-state"><strong>${title}</strong>${detail}</div>`;
     return;
   }
@@ -3752,6 +3752,10 @@ function refreshOverlayHighlight() {
 
 function hasOfficialRows(rows = runtime.__yllSafeRows ?? []) {
   return rows.some((cue) => cue.source !== "visible");
+}
+
+function isFinalOfficialSourceLabel(sourceLabel: string) {
+  return !/临时|temporary|partial/i.test(sourceLabel);
 }
 
 function clearScheduledOfficialRetry() {
@@ -3890,7 +3894,9 @@ function saveRows(rows: LabCue[], sourceLabel: string) {
   }
   runtime.__yllSafeRowsGeneration = (runtime.__yllSafeRowsGeneration ?? 0) + 1;
   runtime.__yllSafeRows = cleanedRows;
-  if (runtime.__yllSafeRows.some((cue) => cue.source !== "visible")) lockOfficialRowsForCurrentVideo();
+  if (runtime.__yllSafeRows.some((cue) => cue.source !== "visible") && isFinalOfficialSourceLabel(sourceLabel)) {
+    lockOfficialRowsForCurrentVideo();
+  }
   applySafeSettings();
   renderRows(runtime.__yllSafeRows);
   addDebugLog("rows:saved", {
@@ -3932,7 +3938,7 @@ function isExtensionContextInvalidated(message?: string) {
 function handleInvalidatedExtensionContext() {
   runtime.__yllSafeContextInvalidated = true;
   stopTimers();
-  setStatus("扩展上下文已过期。请点击 popup 的“唤醒面板”重新注入新版脚本。");
+  setStatus("扩展上下文已过期。请关闭并重新打开 YouTube 视频页以注入新版脚本。");
   addDebugLog("extension-context-invalidated", { version: SCRIPT_VERSION });
   document.getElementById(OVERLAY_ID)?.remove();
   document.getElementById(WORD_POPOVER_ID)?.remove();

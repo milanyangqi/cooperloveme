@@ -70,13 +70,13 @@ export function OptionsApp() {
     }
 
     setAuthPassword("");
-    setMessage(response.data.status === "email-confirmation-required" ? "注册成功，请先到邮箱完成验证后再登录。" : "Supabase 账号已连接。");
+    setMessage(response.data.status === "email-confirmation-required" ? "注册成功，请先到邮箱完成验证后再登录。" : "云端账号已连接。");
     await reload();
   };
 
   const signOut = async () => {
     const response = await sendRuntimeMessage<RemoteAuthSnapshot>({ type: "SIGN_OUT" });
-    setMessage(response.ok ? "已退出 Supabase 账号，本地学习数据仍保留。" : response.error);
+    setMessage(response.ok ? "已退出云端账号，本地学习数据仍保留。" : response.error);
     await reload();
   };
 
@@ -154,7 +154,7 @@ export function OptionsApp() {
       <header className="page-header">
         <div>
           <h1>YouTube Language Lab 设置</h1>
-          <p>本地学习数据继续保留；Supabase 账号用于登录、远端权限和后续云同步。</p>
+          <p>本地学习数据继续保留；云端账号用于登录、远端权限和后续云同步。</p>
         </div>
         <button className="primary-button" type="button" onClick={save}>
           <Save size={16} />
@@ -172,13 +172,13 @@ export function OptionsApp() {
               <strong>{bootstrap.user.displayName}</strong>
               <p>{bootstrap.auth.status === "signed-in" ? bootstrap.user.email ?? bootstrap.user.id : bootstrap.localUser.id}</p>
             </div>
-            <span className="badge">{bootstrap.auth.status === "signed-in" ? "Supabase" : "本地匿名"}</span>
+            <span className="badge">{bootstrap.auth.status === "signed-in" ? "云端" : "本地匿名"}</span>
           </div>
           {bootstrap.auth.status === "signed-in" ? (
             <>
               <div className="future-box">
                 <strong>账号已连接</strong>
-                <p>当前 Pro 权限和额度会从 Supabase `me` 函数读取；本地收藏和练习记录暂时仍存放在此浏览器。</p>
+                <p>当前 Pro 权限和额度会从云端权限接口读取；本地收藏和练习记录暂时仍存放在此浏览器。</p>
               </div>
               <div className="button-row">
                 <button type="button" onClick={startBilling}>

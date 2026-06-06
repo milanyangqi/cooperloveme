@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 12:42:00 CST
+Last updated: 2026-06-07 13:24:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-07 12:42 CST | `0.1.145` prevents temporary `video.textTracks 临时` rows from locking the official-caption path and auto-wakes existing YouTube watch tabs after extension install/startup | Needs Chrome timing review on fresh page load and after extension reload. |
+| Official YouTube caption loading | In Review | 2026-06-07 13:24 CST | `0.1.146` restores the known-good `0.1.53` style of running complete official paths, including transcript panel and player timedtext, before visible fallback | Needs Chrome timing review on fresh page load and after extension reload. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -27,7 +27,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
 | Free translation fallback | In Review | 2026-06-06 19:57 CST | `0.1.126` prioritizes current-cue translation, uses a smaller first batch, and stops invalidated stale scripts to avoid overlay flicker | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | In Review | 2026-06-06 13:51 CST | `0.1.115` enables hover/click lookup on video overlay words and reuses cached or pending free-translation lookups | Needs Chrome hover review. |
-| Subtitle settings panel | In Review | 2026-06-07 12:08 CST | `0.1.144` adds more font choices plus source, translation, highlight, and background color controls with live overlay preview | Needs extension reload and Chrome review. |
+| Subtitle settings panel | In Review | 2026-06-07 13:24 CST | `0.1.146` keeps subtitle style controls, adds restore defaults, and moves highlighter/annotation controls into a separate panel | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-07 12:08 CST | `0.1.144` exposes a direct content-script practice opener and keeps rendered subtitle rows available for practice when the row cache is temporarily empty | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
@@ -439,6 +439,15 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - background install/startup now auto-injects the current content script into existing YouTube watch tabs and dispatches a safe reload event so the panel/subtitles can load without manual popup actions
   - temporary `video.textTracks 临时` rows no longer lock the official caption path; full official track retries can still replace temporary rows
   - popup/options/background user-facing cloud-sync copy now says `云端` instead of exposing Supabase product text
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.146` official-caption recovery and settings split:
+  - compared current code against known-good `0.1.53`, where official captions loaded through captured timedtext, captionTracks/playerResponse, transcript, transcript panel, player timedtext, and YouTubei before visible fallback
+  - official caption attempts now run the full slow path by default and wait for three complete official passes before visible fallback can take over
+  - temporary `video.textTracks 临时` rows wait until at least the second official pass, so partial rows do not hide earlier official-track results
+  - popup settings adds a separate `高亮和注释` entry, and the content settings panel now has a dedicated highlighter/annotation page
+  - subtitle settings panel adds `恢复默认设置`
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

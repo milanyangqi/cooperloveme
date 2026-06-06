@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.145";
+const SCRIPT_VERSION = "0.1.146";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -160,7 +160,7 @@ const TRANSLATION_RETRY_BACKOFF_MS = 15000;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 6000;
 const OFFICIAL_AUTO_ATTEMPTS = 6;
-const OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS = 1;
+const OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS = 3;
 const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 5500;
 const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 16000;
 const USER_SCROLL_PAUSE_MS = 4200;
@@ -176,6 +176,9 @@ type SafeSettings = {
   syncOffsetMs: number;
   wordHighlightOffsetMs: number;
   highlightCurrentWord: boolean;
+  wordLookupEnabled: boolean;
+  wordAnnotationEnabled: boolean;
+  wordProgressEnabled: boolean;
   sourceFontFamily: string;
   translationFontFamily: string;
   sourceColor: string;
@@ -185,6 +188,7 @@ type SafeSettings = {
 };
 
 type SubtitleMode = SafeSettings["subtitleMode"];
+type SettingsPanelView = "subtitle" | "highlight";
 
 const DEFAULT_SETTINGS: SafeSettings = {
   hideNativeCaptions: true,
@@ -197,6 +201,9 @@ const DEFAULT_SETTINGS: SafeSettings = {
   syncOffsetMs: 0,
   wordHighlightOffsetMs: 0,
   highlightCurrentWord: true,
+  wordLookupEnabled: true,
+  wordAnnotationEnabled: true,
+  wordProgressEnabled: true,
   sourceFontFamily: "system-ui",
   translationFontFamily: "system-ui",
   sourceColor: "#f7f8f8",
@@ -227,9 +234,10 @@ const runtime = window as typeof window & {
   __yllSafeLastTranslationFailure?: string;
   __yllSafeLastTranslationSummary?: string;
   __yllSafeSettings?: SafeSettings;
+  __yllSafeSettingsPanelView?: SettingsPanelView;
   __yllSafeScriptVersion?: string;
   __yllSafeStopCurrentScript?: () => void;
-  __yllSafeOpenSettingsPanel?: () => boolean;
+  __yllSafeOpenSettingsPanel?: (view?: SettingsPanelView) => boolean;
   __yllSafeOpenPractice?: () => boolean;
   __yllSafeContextInvalidated?: boolean;
   __yllSafeIsLoadingOfficial?: boolean;
@@ -502,6 +510,9 @@ function loadSafeSettings(): SafeSettings {
       syncOffsetMs: Math.min(2000, Math.max(-2000, Number(stored.syncOffsetMs ?? DEFAULT_SETTINGS.syncOffsetMs))),
       wordHighlightOffsetMs: Math.min(1500, Math.max(-1500, Number(stored.wordHighlightOffsetMs ?? DEFAULT_SETTINGS.wordHighlightOffsetMs))),
       highlightCurrentWord: Boolean(stored.highlightCurrentWord ?? DEFAULT_SETTINGS.highlightCurrentWord),
+      wordLookupEnabled: Boolean(stored.wordLookupEnabled ?? DEFAULT_SETTINGS.wordLookupEnabled),
+      wordAnnotationEnabled: Boolean(stored.wordAnnotationEnabled ?? DEFAULT_SETTINGS.wordAnnotationEnabled),
+      wordProgressEnabled: Boolean(stored.wordProgressEnabled ?? DEFAULT_SETTINGS.wordProgressEnabled),
       sourceFontFamily: parseFontFamily(stored.sourceFontFamily),
       translationFontFamily: parseFontFamily(stored.translationFontFamily),
       sourceColor: parseHexColor(stored.sourceColor, DEFAULT_SETTINGS.sourceColor),
@@ -546,6 +557,7 @@ function updateModeSelect() {
 }
 
 function renderClickableText(text: string) {
+  if (!loadSafeSettings().wordLookupEnabled) return escapeHtml(text);
   const pattern = /(\p{L}[\p{L}\p{M}'-]*|\p{N}+)/gu;
   let output = "";
   let lastIndex = 0;
@@ -1200,6 +1212,51 @@ function installStyle() {
     #${SETTINGS_PANEL_ID} input[type="color"]::-webkit-color-swatch {
       border: 0;
       border-radius: 5px;
+    }
+    #${SETTINGS_PANEL_ID} .yll-setting-link {
+      min-width: 96px;
+      height: 30px;
+      padding: 0 10px;
+      color: #f7f8f8;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 7px;
+      font-weight: 740;
+      cursor: pointer;
+    }
+    #${SETTINGS_PANEL_ID} .yll-setting-link.is-muted,
+    #${SETTINGS_PANEL_ID} .yll-setting-link:disabled {
+      color: #9aa2ad;
+      cursor: default;
+    }
+    #${SETTINGS_PANEL_ID} .yll-settings-reset {
+      width: 100%;
+      height: 38px;
+      margin-top: 16px;
+      color: #111417;
+      background: #ffc857;
+      border: 0;
+      border-radius: 8px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+    #${SETTINGS_PANEL_ID} .yll-pos-grid {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 8px;
+    }
+    #${SETTINGS_PANEL_ID} .yll-pos-grid label {
+      min-height: 34px;
+      padding: 4px 0;
+    }
+    #${SETTINGS_PANEL_ID} .yll-pos-grid i {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      margin-left: 8px;
+      border-radius: 4px;
+      vertical-align: -3px;
     }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
     #${SETTINGS_PANEL_ID} .yll-preview-box {
@@ -2900,11 +2957,12 @@ function toggleSettingsPanel() {
     existing.remove();
     return;
   }
-  openSettingsPanel();
+  openSettingsPanel("subtitle");
 }
 
-function openSettingsPanel() {
+function openSettingsPanel(view: SettingsPanelView = "subtitle") {
   mountPanel();
+  runtime.__yllSafeSettingsPanelView = view;
   ensureSettingsPanel();
   renderSettingsPanel();
   return Boolean(document.getElementById(SETTINGS_PANEL_ID));
@@ -2914,7 +2972,7 @@ function renderSettingsPanel() {
   const existing = document.getElementById(SETTINGS_PANEL_ID);
   const settings = loadSafeSettings();
   if (!existing) return;
-  existing.innerHTML = settingsPanelHtml(settings);
+  existing.innerHTML = settingsPanelHtml(settings, runtime.__yllSafeSettingsPanelView ?? "subtitle");
   bindSettingsPanel(existing);
 }
 
@@ -2933,7 +2991,8 @@ function fontOptionsHtml(selected: string) {
   ].map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
 }
 
-function settingsPanelHtml(settings: SafeSettings) {
+function settingsPanelHtml(settings: SafeSettings, view: SettingsPanelView) {
+  if (view === "highlight") return highlightSettingsPanelHtml(settings);
   return `
     <div class="yll-settings-head">
       <button class="yll-settings-close yll-settings-back" type="button" data-settings-close>›</button>
@@ -2976,8 +3035,8 @@ function settingsPanelHtml(settings: SafeSettings) {
         <input type="color" data-setting="overlayBackgroundColor" value="${settings.overlayBackgroundColor}">
       </label>
       <label>
-        <span>悬停查词<small>鼠标悬停字幕单词时显示释义。</small></span>
-        <input type="checkbox" data-setting="highlightCurrentWord" ${settings.highlightCurrentWord ? "checked" : ""}>
+        <span>高亮和注释</span>
+        <button class="yll-setting-link" type="button" data-settings-view="highlight">打开面板 ›</button>
       </label>
       <label>
         <span>隐藏 YouTube CC</span>
@@ -2999,10 +3058,6 @@ function settingsPanelHtml(settings: SafeSettings) {
       <label>
         <span>原字幕颜色</span>
         <input type="color" data-setting="sourceColor" value="${settings.sourceColor}">
-      </label>
-      <label>
-        <span>高亮颜色</span>
-        <input type="color" data-setting="highlightColor" value="${settings.highlightColor}">
       </label>
     </div>
     <div class="yll-settings-group">
@@ -3037,6 +3092,90 @@ function settingsPanelHtml(settings: SafeSettings) {
       <h4>样式预览</h4>
       <div class="yll-preview-box" style="background:${settings.overlayBackgroundColor};color:${settings.sourceColor};font-family:${cssFontFamily(settings.sourceFontFamily)}">You can read<br>the <span style="color:${settings.highlightColor}">demo</span> content<br><em style="color:${settings.translationColor};font-family:${cssFontFamily(settings.translationFontFamily)}">您可以查看示例内容</em></div>
     </div>
+    <button class="yll-settings-reset" type="button" data-settings-reset>恢复默认设置</button>
+  `;
+}
+
+function highlightSettingsPanelHtml(settings: SafeSettings) {
+  return `
+    <div class="yll-settings-head">
+      <button class="yll-settings-close yll-settings-back" type="button" data-settings-view="subtitle">‹</button>
+      <h3>高亮和注释</h3>
+      <button class="yll-settings-close" type="button" data-settings-close>×</button>
+    </div>
+    <div class="yll-settings-group">
+      <h4>生词标示</h4>
+      <label>
+        <span>启用<small>开启后字幕单词可以点击查词，并用于生词收藏。</small></span>
+        <input type="checkbox" data-setting="wordLookupEnabled" ${settings.wordLookupEnabled ? "checked" : ""}>
+      </label>
+      <label>
+        <span>查词交互</span>
+        <select data-setting="wordLookupEnabled">
+          <option value="true" ${settings.wordLookupEnabled ? "selected" : ""}>点击</option>
+          <option value="false" ${!settings.wordLookupEnabled ? "selected" : ""}>关闭</option>
+        </select>
+      </label>
+      <label>
+        <span>注释样式</span>
+        <select data-setting="wordAnnotationEnabled">
+          <option value="true" ${settings.wordAnnotationEnabled ? "selected" : ""}>右侧注释</option>
+          <option value="false" ${!settings.wordAnnotationEnabled ? "selected" : ""}>关闭</option>
+        </select>
+      </label>
+      <label>
+        <span>高亮样式</span>
+        <select data-setting="highlightCurrentWord">
+          <option value="true" ${settings.highlightCurrentWord ? "selected" : ""}>字体颜色</option>
+          <option value="false" ${!settings.highlightCurrentWord ? "selected" : ""}>关闭</option>
+        </select>
+      </label>
+      <label>
+        <span>高亮颜色</span>
+        <input type="color" data-setting="highlightColor" value="${settings.highlightColor}">
+      </label>
+      <label>
+        <span>激活快捷键</span>
+        <button class="yll-setting-link is-muted" type="button" disabled>去设置 ›</button>
+      </label>
+      <label>
+        <span>查词自动收藏生词</span>
+        <input type="checkbox" data-setting="wordAnnotationEnabled" ${settings.wordAnnotationEnabled ? "checked" : ""}>
+      </label>
+      <label>
+        <span>显示单词进度</span>
+        <input type="checkbox" data-setting="wordProgressEnabled" ${settings.wordProgressEnabled ? "checked" : ""}>
+      </label>
+    </div>
+    <div class="yll-settings-group">
+      <h4>词性标注</h4>
+      <label>
+        <span>启用<small>后续会按词性显示更细的标注颜色。</small></span>
+        <input type="checkbox" data-setting="wordProgressEnabled" ${settings.wordProgressEnabled ? "checked" : ""}>
+      </label>
+      <label>
+        <span>是否显示词卡</span>
+        <input type="checkbox" data-setting="wordAnnotationEnabled" ${settings.wordAnnotationEnabled ? "checked" : ""}>
+      </label>
+      <label>
+        <span>高亮内容</span>
+        <select data-setting="wordAnnotationEnabled">
+          <option value="true" ${settings.wordAnnotationEnabled ? "selected" : ""}>自定义</option>
+          <option value="false" ${!settings.wordAnnotationEnabled ? "selected" : ""}>关闭</option>
+        </select>
+      </label>
+      <div class="yll-pos-grid">
+        <label><span>名词 <i style="background:#f33478"></i></span><input type="checkbox" checked disabled></label>
+        <label><span>动词 <i style="background:#7f57d8"></i></span><input type="checkbox" checked disabled></label>
+        <label><span>形容词 <i style="background:#42bbc1"></i></span><input type="checkbox" checked disabled></label>
+        <label><span>副词 <i style="background:#43c000"></i></span><input type="checkbox" checked disabled></label>
+      </div>
+    </div>
+    <div class="yll-settings-group">
+      <h4>预览</h4>
+      <div class="yll-preview-box" style="background:${settings.overlayBackgroundColor};color:${settings.sourceColor};font-family:${cssFontFamily(settings.sourceFontFamily)}">You can <span style="color:${settings.highlightColor}">read</span><br>the demo content<br><em style="color:${settings.translationColor};font-family:${cssFontFamily(settings.translationFontFamily)}">您可以查看示例内容</em></div>
+    </div>
+    <button class="yll-settings-reset" type="button" data-settings-reset>恢复默认设置</button>
   `;
 }
 
@@ -3044,15 +3183,29 @@ function bindSettingsPanel(panel: HTMLElement) {
   panel.querySelector<HTMLButtonElement>("[data-settings-close]")?.addEventListener("click", () => {
     panel.remove();
   });
+  panel.querySelectorAll<HTMLButtonElement>("[data-settings-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.dataset.settingsView === "highlight" ? "highlight" : "subtitle";
+      runtime.__yllSafeSettingsPanelView = view;
+      renderSettingsPanel();
+    });
+  });
+  panel.querySelector<HTMLButtonElement>("[data-settings-reset]")?.addEventListener("click", () => {
+    saveSafeSettings({ ...DEFAULT_SETTINGS });
+    runtime.__yllSafeSettingsPanelView = runtime.__yllSafeSettingsPanelView ?? "subtitle";
+    renderSettingsPanel();
+    setCaptionStatus("字幕设置已恢复默认。", "设置");
+  });
   panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input[data-setting], select[data-setting]").forEach((input) => {
     const readNext = () => {
       const current = loadSafeSettings();
       const key = input.dataset.setting as keyof SafeSettings;
       const next: SafeSettings = { ...current };
+      const defaultValue = DEFAULT_SETTINGS[key];
       if (input.type === "checkbox") {
         (next[key] as boolean | number | string) = (input as HTMLInputElement).checked;
       } else if (input instanceof HTMLSelectElement) {
-        (next[key] as boolean | number | string) = input.value;
+        (next[key] as boolean | number | string) = typeof defaultValue === "boolean" ? input.value === "true" : input.value;
       } else if (input.type === "color") {
         (next[key] as boolean | number | string) = input.value;
       } else {
@@ -5464,7 +5617,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
     let partialTextTrackRows: LabCue[] = [];
     setCaptionStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`, "官方字幕轨道");
     try {
-      const includeSlowPaths = attempt > 0 || Boolean(options.force) || Boolean(hasVisibleRows && runtime.__yllSafeOfficialAttemptCount % 4 === 0);
+      const includeSlowPaths = true;
       const attemptTimeoutMs = includeSlowPaths ? OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS : OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS;
       addDebugLog("load:official-attempt", { attempt: attempt + 1, max: OFFICIAL_AUTO_ATTEMPTS, includeSlowPaths, attemptTimeoutMs });
       const officialRows = await withTimeout(
@@ -5533,7 +5686,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
 
-    if (partialTextTrackRows.length >= 2 && !(runtime.__yllSafeRows ?? []).length) {
+    if (partialTextTrackRows.length >= 2 && attempt + 1 >= 2 && !(runtime.__yllSafeRows ?? []).length) {
       saveRows(partialTextTrackRows, "video.textTracks 临时");
       runtime.__yllSafeIsLoadingOfficial = false;
       runtime.__yllSafeLoadingVideoId = undefined;

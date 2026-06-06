@@ -342,6 +342,17 @@ export function PopupApp() {
     }
   };
 
+  const openHighlightSettingsPanel = async () => {
+    try {
+      setStatus("正在打开高亮和注释设置...");
+      await wakeSafeContentScript("新版字幕面板已唤醒。");
+      const opened = await dispatchActiveYouTubeEvent("yll-open-settings", true, "highlight");
+      setStatus(opened ? "高亮和注释设置已打开。" : "请先切换到 YouTube 视频播放页。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "高亮和注释设置打开失败。");
+    }
+  };
+
   const loadMiniCaptions = async () => {
     try {
       setStatus("正在唤醒新版字幕读取任务...");
@@ -451,7 +462,7 @@ export function PopupApp() {
     await chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
   };
 
-  const dispatchActiveYouTubeEvent = async (eventName: string, openSettings = false) => {
+  const dispatchActiveYouTubeEvent = async (eventName: string, openSettings = false, settingsView: "subtitle" | "highlight" = "subtitle") => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url) return false;
 
@@ -460,13 +471,13 @@ export function PopupApp() {
 
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: (name: string, shouldOpenSettings: boolean) => {
-        const page = window as Window & { __yllSafeOpenSettingsPanel?: () => boolean };
-        if (shouldOpenSettings && page.__yllSafeOpenSettingsPanel?.()) return true;
+      func: (name: string, shouldOpenSettings: boolean, view: "subtitle" | "highlight") => {
+        const page = window as Window & { __yllSafeOpenSettingsPanel?: (settingsView?: "subtitle" | "highlight") => boolean };
+        if (shouldOpenSettings && page.__yllSafeOpenSettingsPanel?.(view)) return true;
         window.dispatchEvent(new Event(name));
         return shouldOpenSettings ? Boolean(document.getElementById("yll-lab-settings-v2")) : true;
       },
-      args: [eventName, openSettings]
+      args: [eventName, openSettings, settingsView]
     });
     return Boolean(result?.result);
   };
@@ -1142,6 +1153,7 @@ export function PopupApp() {
                   onChange={(checked) => void updateSettings({ hideNativeCaptions: checked })}
                 />
                 <ActionSetting icon={<Settings size={17} />} label="字幕设置" value="打开面板" onClick={openSubtitleSettingsPanel} />
+                <ActionSetting icon={<Settings size={17} />} label="高亮和注释" value="打开面板" onClick={openHighlightSettingsPanel} />
               </SettingsSection>
 
               {isSignedIn ? (

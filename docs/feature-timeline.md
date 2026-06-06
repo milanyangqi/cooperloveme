@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 18:23:47 CST
+Last updated: 2026-06-06 19:04:34 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -38,7 +38,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Export / Anki / CSV | In Review | 2026-06-03 13:05 CST | `0.1.81` adds JSON, CSV, and Anki CSV exports inside the local library panel | Needs Chrome download review; advanced Pro export can be expanded later. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
-| Popup account login entry | In Review | 2026-06-06 18:23 CST | `0.1.119` increases the popup container height and adds membership, export, recording-save, and sync controls to the settings tab | Needs extension reload and popup review. |
+| Popup account login entry | In Review | 2026-06-06 19:04 CST | `0.1.123` matches the popup target height to the right subtitle panel and applies playback speed changes to the active YouTube video | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
 | Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
 | Stale content-script protection | In Review | 2026-06-06 13:45 CST | `0.1.115` injects on all `www.youtube.com/*` pages and lets the script self-activate on watch routes, covering YouTube SPA navigation | Needs extension reload and fresh YouTube page review. |
@@ -230,6 +230,34 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - increased the extension icon popup container from 360x520 to 390x680 so the settings view exposes more rows before scrolling
   - added signed-in account actions for membership management and sign-out inside the popup settings tab
   - added local export, cloud sync, and save-recording controls through existing background runtime messages/settings storage
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and popup review
+
+- Local `0.1.120` popup size and playback-speed expansion:
+  - increased the extension icon popup container to 410x760 to show more of the account and settings content at once
+  - expanded playback speed options from four values to fine-grained 0.5x through 2.0x choices
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and popup review
+
+- Local `0.1.121` login-gated popup actions and taller container:
+  - hides the full-screen mixed-practice entry, practice settings, recording-save toggle, wordbook/learning-library entry, cloud-sync toggle, and learning-data export until the Supabase account is signed in
+  - keeps anonymous users focused on login, page detection, panel wake, and caption reread controls
+  - increased the requested popup container to 430x860; Chrome may still cap action-popup height on smaller screens, so runtime review must confirm whether the host browser adds its own scrollbar
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and popup review
+
+- Local `0.1.122` Relingo-style signed-in popup dashboard:
+  - added a signed-in `我的` dashboard with feature cards for vocab, mastered words, sentence library, mixed practice, and PDF translation placeholder
+  - added site-level controls for plugin enablement and always-translate behavior using existing settings storage
+  - added a compact learning-library preview list sourced from local vocab and saved sentence records
+  - added an account detail subpage with email, plan, expiry, stats, personal center, and sign-out actions
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and popup review
+
+- Local `0.1.123` popup height and playback-rate application:
+  - popup now computes its target height from the active YouTube page viewport using the same 520px / viewport-minus-92px / 1040px rule as the right subtitle panel
+  - popup body scrolling is contained inside the main panel while the requested outer height stays aligned to the subtitle panel target
+  - playback speed changes now save settings and immediately apply `video.playbackRate` to the active YouTube tab
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and popup review
 

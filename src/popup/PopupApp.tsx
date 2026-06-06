@@ -4,9 +4,12 @@ import {
   Captions,
   CheckCircle2,
   ChevronRight,
+  CircleAlert,
   CreditCard,
   Download,
   Dumbbell,
+  FileText,
+  Heart,
   Languages,
   LogIn,
   LogOut,
@@ -41,7 +44,27 @@ type PopupBootstrap = {
   };
 };
 
-type PopupView = "home" | "settings";
+type PopupView = "home" | "settings" | "account";
+
+type VocabPreview = {
+  text?: string;
+  meaning?: string;
+  mastery?: number;
+};
+
+type SentencePreview = {
+  text?: string;
+  translatedText?: string;
+};
+
+type PlaybackRateApplyResult = {
+  count: number;
+  rate: number;
+};
+
+const CAPTION_PANEL_MIN_HEIGHT = 520;
+const CAPTION_PANEL_MAX_HEIGHT = 1040;
+const CAPTION_PANEL_VERTICAL_OFFSET = 92;
 
 const LANGUAGE_OPTIONS = [
   { value: "en", label: "英语" },
@@ -53,10 +76,25 @@ const LANGUAGE_OPTIONS = [
 ];
 
 const PLAYBACK_RATE_OPTIONS = [
+  { value: "0.5", label: "0.5x" },
+  { value: "0.6", label: "0.6x" },
+  { value: "0.7", label: "0.7x" },
+  { value: "0.75", label: "0.75x" },
   { value: "0.8", label: "0.8x" },
+  { value: "0.85", label: "0.85x" },
+  { value: "0.9", label: "0.9x" },
+  { value: "0.95", label: "0.95x" },
   { value: "1", label: "1.0x" },
+  { value: "1.05", label: "1.05x" },
   { value: "1.1", label: "1.1x" },
-  { value: "1.25", label: "1.25x" }
+  { value: "1.15", label: "1.15x" },
+  { value: "1.2", label: "1.2x" },
+  { value: "1.25", label: "1.25x" },
+  { value: "1.3", label: "1.3x" },
+  { value: "1.4", label: "1.4x" },
+  { value: "1.5", label: "1.5x" },
+  { value: "1.75", label: "1.75x" },
+  { value: "2", label: "2.0x" }
 ];
 
 export function PopupApp() {
@@ -67,6 +105,35 @@ export function PopupApp() {
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [activeView, setActiveView] = useState<PopupView>("home");
+
+  const syncPopupHeightWithCaptionPanel = async () => {
+    const applyHeight = (viewportHeight: number) => {
+      if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return;
+      const panelHeight = Math.min(
+        CAPTION_PANEL_MAX_HEIGHT,
+        Math.max(CAPTION_PANEL_MIN_HEIGHT, Math.round(viewportHeight - CAPTION_PANEL_VERTICAL_OFFSET))
+      );
+      document.documentElement.style.setProperty("--yll-popup-height", `${panelHeight}px`);
+    };
+
+    applyHeight(window.screen?.availHeight ?? CAPTION_PANEL_MAX_HEIGHT);
+
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id || !tab.url) return;
+
+      const parsed = new URL(tab.url);
+      if (!parsed.hostname.includes("youtube.com")) return;
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.innerHeight
+      });
+      if (typeof result?.result === "number") applyHeight(result.result);
+    } catch {
+      // Keep the screen-height fallback. Chrome may deny injection on non-page tabs.
+    }
+  };
 
   const reloadBootstrap = async () => {
     const response = await sendRuntimeMessage<PopupBootstrap>({ type: "GET_BOOTSTRAP" });
@@ -80,6 +147,7 @@ export function PopupApp() {
 
   useEffect(() => {
     void reloadBootstrap();
+    void syncPopupHeightWithCaptionPanel();
   }, []);
 
   const wakeSafeContentScript = async (message: string) => {
@@ -209,6 +277,45 @@ export function PopupApp() {
     }
   };
 
+  const applyPlaybackRateToActiveTab = async (playbackRate: number) => {
+    try {
+      if (!Number.isFinite(playbackRate) || playbackRate <= 0) {
+        setStatus("播放速度无效。");
+        return;
+      }
+
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id || !tab.url) {
+        setStatus("播放速度已保存，但没有找到当前标签页。");
+        return;
+      }
+
+      const parsed = new URL(tab.url);
+      if (!parsed.hostname.includes("youtube.com")) {
+        setStatus("播放速度已保存；切换到 YouTube 视频页后再应用。");
+        return;
+      }
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (nextRate: number) => {
+          const videos = Array.from(document.querySelectorAll<HTMLVideoElement>("video"));
+          videos.forEach((video) => {
+            video.playbackRate = nextRate;
+            video.dispatchEvent(new Event("ratechange", { bubbles: true }));
+          });
+          const activeVideo = videos.find((video) => !video.paused) ?? videos[0];
+          return { count: videos.length, rate: activeVideo?.playbackRate ?? nextRate };
+        },
+        args: [playbackRate]
+      });
+      const payload = result?.result as PlaybackRateApplyResult | undefined;
+      setStatus(payload?.count ? `播放速度已调整为 ${payload.rate}x。` : "播放速度已保存，但当前页面没有找到视频。");
+    } catch (error) {
+      setStatus(error instanceof Error ? `播放速度已保存，但应用失败：${error.message}` : "播放速度已保存，但应用失败。");
+    }
+  };
+
   const submitAuth = async (type: "SIGN_IN_EMAIL" | "SIGN_UP_EMAIL") => {
     if (!authEmail.trim() || !authPassword) {
       setStatus("请输入邮箱和密码。");
@@ -281,6 +388,7 @@ export function PopupApp() {
     if (!settingsDraft) return;
 
     const previous = settingsDraft;
+    const playbackRateToApply = typeof patch.playbackRate === "number" ? patch.playbackRate : null;
     const next = mergeSettings(settingsDraft, patch);
     setSettingsDraft(next);
     setBootstrap((current) => (current ? { ...current, settings: next } : current));
@@ -295,6 +403,10 @@ export function PopupApp() {
 
     setSettingsDraft(response.data);
     setBootstrap((current) => (current ? { ...current, settings: response.data } : current));
+    if (playbackRateToApply !== null) {
+      await applyPlaybackRateToActiveTab(playbackRateToApply);
+      return;
+    }
     setStatus("设置已保存。");
   };
 
@@ -302,6 +414,11 @@ export function PopupApp() {
   const vocabCount = bootstrap?.library.vocabItems.length ?? 0;
   const sentenceCount = bootstrap?.library.sentenceNotes.length ?? 0;
   const practiceCount = bootstrap?.library.practiceAttempts.length ?? 0;
+  const vocabItems = (bootstrap?.library.vocabItems as VocabPreview[] | undefined) ?? [];
+  const sentenceNotes = (bootstrap?.library.sentenceNotes as SentencePreview[] | undefined) ?? [];
+  const masteredCount = vocabItems.filter((item) => item.mastery && item.mastery >= 4).length;
+  const recentVocab = vocabItems.slice(0, 9);
+  const recentSentences = sentenceNotes.slice(0, 4);
   const accountBadge = !bootstrap ? "LOADING" : isSignedIn ? "SIGNED IN" : "LOCAL";
   const settings = settingsDraft;
 
@@ -316,106 +433,129 @@ export function PopupApp() {
 
       {activeView === "home" ? (
         <>
-          <section className="hero-panel" role="button" tabIndex={0} onClick={openPractice} onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") void openPractice();
-          }}>
-            <div className="hero-icon">
-              <Mic size={24} />
-            </div>
-            <div>
-              <strong>全屏混合练习</strong>
-              <span>跟读评分、听写、填空、理解选择</span>
-            </div>
-          </section>
+          {isSignedIn ? (
+            <>
+              <section className="signed-home-head">
+                <button type="button" onClick={() => setActiveView("account")}>
+                  <UserRound size={17} />
+                  <span>{bootstrap?.user.email ?? bootstrap?.user.displayName ?? "账号"}</span>
+                  <ChevronRight size={16} />
+                </button>
+                <span className="plan">
+                  <ShieldCheck size={13} />
+                  {bootstrap?.entitlement.plan.toUpperCase()}
+                </span>
+              </section>
 
-          <section className="login-card">
-            <div className="login-heading">
-              <span className="label">账号</span>
-              <span className="plan">
-                <ShieldCheck size={13} />
-                {accountBadge}
-              </span>
-            </div>
-            {!bootstrap ? (
-              <div className="account-loading" aria-live="polite">
-                <span className="loading-line wide" />
-                <span className="loading-line" />
-                <p>正在读取已保存的登录状态...</p>
-              </div>
-            ) : isSignedIn ? (
-              <>
-                <div className="account-row-mini">
-                  <UserRound size={18} />
-                  <div>
-                    <strong>{bootstrap.user.email ?? bootstrap.user.displayName ?? "Supabase 用户"}</strong>
-                    <p>{bootstrap.entitlement.plan.toUpperCase()} · 本地学习数据继续保留</p>
+              <section className="feature-grid">
+                <FeatureCard icon={<BookOpen size={18} />} label="生词" value={vocabCount} onClick={openOptions} />
+                <FeatureCard icon={<CheckCircle2 size={18} />} label="已掌握" value={masteredCount} onClick={openOptions} />
+                <FeatureCard icon={<BookMarked size={18} />} label="例句库" value={sentenceCount} onClick={openOptions} />
+                <FeatureCard icon={<Dumbbell size={18} />} label="混合练习" value={practiceCount} onClick={openPractice} />
+                <FeatureCard icon={<FileText size={18} />} label="PDF 翻译" value="beta" onClick={openOptions} />
+              </section>
+
+              {settings ? (
+                <section className="site-card">
+                  <SwitchSetting
+                    icon={<Power size={17} />}
+                    label="允许在此网站运行"
+                    checked={settings.enabled}
+                    onChange={(checked) => void updateSettings({ enabled: checked })}
+                  />
+                  <SwitchSetting
+                    icon={<Languages size={17} />}
+                    label="始终翻译此站点"
+                    checked={settings.showDualSubtitles}
+                    onChange={(checked) => void updateSettings({ showDualSubtitles: checked })}
+                  />
+                  <ActionSetting icon={<Settings size={17} />} label="youtube.com" value="管理黑名单" onClick={() => setActiveView("settings")} />
+                </section>
+              ) : null}
+
+              <section className="library-preview">
+                <div className="preview-tabs">
+                  <button className="active" type="button">本页生词</button>
+                  <button type="button">已掌握({masteredCount})</button>
+                  <button type="button">收藏句({sentenceCount})</button>
+                </div>
+                {recentVocab.length ? (
+                  <div className="word-list">
+                    {recentVocab.map((item, index) => (
+                      <button key={`${item.text ?? "word"}-${index}`} type="button" onClick={openOptions}>
+                        <span>
+                          <strong>{item.text ?? "未命名单词"}</strong>
+                          <small>{item.meaning ?? "释义待补充"}</small>
+                        </span>
+                        <Heart size={15} />
+                        <ChevronRight size={15} />
+                      </button>
+                    ))}
                   </div>
+                ) : (
+                  <div className="empty-preview">
+                    <CircleAlert size={18} />
+                    <span>当前还没有收藏生词。</span>
+                  </div>
+                )}
+                {recentSentences.length ? (
+                  <button className="sentence-preview-link" type="button" onClick={openOptions}>
+                    查看 {recentSentences.length} 条最近收藏句
+                    <ChevronRight size={15} />
+                  </button>
+                ) : null}
+              </section>
+            </>
+          ) : null}
+
+          {!isSignedIn ? (
+            <section className="login-card">
+              <div className="login-heading">
+                <span className="label">账号</span>
+                <span className="plan">
+                  <ShieldCheck size={13} />
+                  {accountBadge}
+                </span>
+              </div>
+              {!bootstrap ? (
+                <div className="account-loading" aria-live="polite">
+                  <span className="loading-line wide" />
+                  <span className="loading-line" />
+                  <p>正在读取已保存的登录状态...</p>
                 </div>
-                <div className="account-dashboard">
-                  <button type="button" onClick={openOptions}>
-                    <BookOpen size={18} />
-                    <span>生词</span>
-                    <strong>{vocabCount}</strong>
-                  </button>
-                  <button type="button" onClick={openOptions}>
-                    <BookMarked size={18} />
-                    <span>收藏句</span>
-                    <strong>{sentenceCount}</strong>
-                  </button>
-                  <button type="button" onClick={openPractice}>
-                    <Dumbbell size={18} />
-                    <span>练习</span>
-                    <strong>{practiceCount}</strong>
-                  </button>
-                  <button type="button" onClick={openOptions}>
-                    <CheckCircle2 size={18} />
-                    <span>已掌握</span>
-                    <strong>0</strong>
-                  </button>
-                </div>
-                <div className="mini-button-row">
-                  <button type="button" onClick={() => setActiveView("settings")}>
-                    <Settings size={15} />
-                    设置
-                  </button>
-                  <button type="button" onClick={signOut} disabled={authBusy}>
-                    <LogOut size={15} />
-                    退出
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="login-fields">
-                  <label>
-                    <span>邮箱</span>
-                    <input type="email" value={authEmail} autoComplete="email" onChange={(event) => setAuthEmail(event.target.value)} />
-                  </label>
-                  <label>
-                    <span>密码</span>
-                    <input
-                      type="password"
-                      value={authPassword}
-                      autoComplete="current-password"
-                      placeholder="至少 6 位"
-                      onChange={(event) => setAuthPassword(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="mini-button-row">
-                  <button type="button" onClick={() => submitAuth("SIGN_IN_EMAIL")} disabled={authBusy}>
-                    <LogIn size={15} />
-                    登录
-                  </button>
-                  <button type="button" onClick={() => submitAuth("SIGN_UP_EMAIL")} disabled={authBusy}>
-                    <UserRound size={15} />
-                    注册
-                  </button>
-                </div>
-                <p className="login-note">V1 可匿名使用；登录后读取远端权限，后续用于云同步。</p>
-              </>
-            )}
-          </section>
+              ) : (
+                <>
+                  <div className="login-fields">
+                    <label>
+                      <span>邮箱</span>
+                      <input type="email" value={authEmail} autoComplete="email" onChange={(event) => setAuthEmail(event.target.value)} />
+                    </label>
+                    <label>
+                      <span>密码</span>
+                      <input
+                        type="password"
+                        value={authPassword}
+                        autoComplete="current-password"
+                        placeholder="至少 6 位"
+                        onChange={(event) => setAuthPassword(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="mini-button-row">
+                    <button type="button" onClick={() => submitAuth("SIGN_IN_EMAIL")} disabled={authBusy}>
+                      <LogIn size={15} />
+                      登录
+                    </button>
+                    <button type="button" onClick={() => submitAuth("SIGN_UP_EMAIL")} disabled={authBusy}>
+                      <UserRound size={15} />
+                      注册
+                    </button>
+                  </div>
+                  <p className="login-note">V1 可匿名使用；登录后读取远端权限，后续用于云同步。</p>
+                </>
+              )}
+            </section>
+          ) : null}
 
           <div className="action-grid">
             <button type="button" onClick={runSafePageProbe}>
@@ -435,8 +575,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.119 待审核</strong>
-              <p>加长 popup 设置容器，并补充会员、导出和同步开关。</p>
+              <strong>0.1.123 待审核</strong>
+              <p>弹窗高度跟随字幕面板，并修复播放速度即时应用。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -444,7 +584,7 @@ export function PopupApp() {
             </span>
           </section>
         </>
-      ) : (
+      ) : activeView === "settings" ? (
         <section className="popup-settings">
           <div className="settings-title-row">
             <div>
@@ -466,7 +606,7 @@ export function PopupApp() {
                   icon={<UserRound size={17} />}
                   label={isSignedIn ? bootstrap.user.email ?? bootstrap.user.displayName ?? "Supabase 用户" : "本地匿名"}
                   value={isSignedIn ? bootstrap.entitlement.plan.toUpperCase() : "LOCAL"}
-                  onClick={isSignedIn ? openOptions : () => setActiveView("home")}
+                  onClick={isSignedIn ? () => setActiveView("account") : () => setActiveView("home")}
                 />
                 {isSignedIn ? (
                   <>
@@ -485,7 +625,7 @@ export function PopupApp() {
                   checked={settings.enabled}
                   onChange={(checked) => void updateSettings({ enabled: checked })}
                 />
-                <ActionSetting icon={<BookMarked size={17} />} label="词本管理" value={`${vocabCount} 个生词`} onClick={openOptions} />
+                {isSignedIn ? <ActionSetting icon={<BookMarked size={17} />} label="词本管理" value={`${vocabCount} 个生词`} onClick={openOptions} /> : null}
               </SettingsSection>
 
               <SettingsSection title="语言设置" accent>
@@ -521,48 +661,52 @@ export function PopupApp() {
                 <ActionSetting icon={<Settings size={17} />} label="字幕设置" value="打开面板" onClick={mountMiniPanel} />
               </SettingsSection>
 
-              <SettingsSection title="练习设置" accent>
-                <SwitchSetting
-                  icon={<Dumbbell size={17} />}
-                  label="逐句自动暂停"
-                  checked={settings.autoPauseInPractice}
-                  onChange={(checked) => void updateSettings({ autoPauseInPractice: checked })}
-                />
-                <SwitchSetting
-                  icon={<Dumbbell size={17} />}
-                  label="循环当前句"
-                  checked={settings.loopPracticeCue}
-                  onChange={(checked) => void updateSettings({ loopPracticeCue: checked })}
-                />
-                <SelectSetting
-                  icon={<Mic size={17} />}
-                  label="播放速度"
-                  value={String(settings.playbackRate)}
-                  options={PLAYBACK_RATE_OPTIONS}
-                  onChange={(value) => void updateSettings({ playbackRate: Number(value) })}
-                />
-                <SwitchSetting
-                  icon={<Mic size={17} />}
-                  label="保存跟读录音"
-                  checked={settings.saveRawRecordings}
-                  onChange={(checked) => void updateSettings({ saveRawRecordings: checked })}
-                />
-              </SettingsSection>
+              {isSignedIn ? (
+                <SettingsSection title="练习设置" accent>
+                  <SwitchSetting
+                    icon={<Dumbbell size={17} />}
+                    label="逐句自动暂停"
+                    checked={settings.autoPauseInPractice}
+                    onChange={(checked) => void updateSettings({ autoPauseInPractice: checked })}
+                  />
+                  <SwitchSetting
+                    icon={<Dumbbell size={17} />}
+                    label="循环当前句"
+                    checked={settings.loopPracticeCue}
+                    onChange={(checked) => void updateSettings({ loopPracticeCue: checked })}
+                  />
+                  <SelectSetting
+                    icon={<Mic size={17} />}
+                    label="播放速度"
+                    value={String(settings.playbackRate)}
+                    options={PLAYBACK_RATE_OPTIONS}
+                    onChange={(value) => void updateSettings({ playbackRate: Number(value) })}
+                  />
+                  <SwitchSetting
+                    icon={<Mic size={17} />}
+                    label="保存跟读录音"
+                    checked={settings.saveRawRecordings}
+                    onChange={(checked) => void updateSettings({ saveRawRecordings: checked })}
+                  />
+                </SettingsSection>
+              ) : null}
 
-              <SettingsSection title="数据设置" accent>
-                <SwitchSetting
-                  icon={<ShieldCheck size={17} />}
-                  label="云同步"
-                  checked={settings.syncEnabled}
-                  onChange={(checked) => void updateSettings({ syncEnabled: checked })}
-                />
-                <ActionSetting
-                  icon={<Download size={17} />}
-                  label="导出数据"
-                  value={`${sentenceCount} 句 / ${vocabCount} 词`}
-                  onClick={exportData}
-                />
-              </SettingsSection>
+              {isSignedIn ? (
+                <SettingsSection title="数据设置" accent>
+                  <SwitchSetting
+                    icon={<ShieldCheck size={17} />}
+                    label="云同步"
+                    checked={settings.syncEnabled}
+                    onChange={(checked) => void updateSettings({ syncEnabled: checked })}
+                  />
+                  <ActionSetting
+                    icon={<Download size={17} />}
+                    label="导出数据"
+                    value={`${sentenceCount} 句 / ${vocabCount} 词`}
+                    onClick={exportData}
+                  />
+                </SettingsSection>
+              ) : null}
 
               <SettingsSection title="翻译与更多" accent>
                 <SwitchSetting
@@ -573,6 +717,45 @@ export function PopupApp() {
                 />
                 <ActionSetting icon={<Settings size={17} />} label="高级设置" value="选项页" onClick={openOptions} />
               </SettingsSection>
+            </>
+          )}
+        </section>
+      ) : (
+        <section className="account-detail">
+          <div className="subpage-title">
+            <button type="button" onClick={() => setActiveView("settings")}>
+              <ChevronRight size={17} />
+            </button>
+            <strong>账号</strong>
+            <button type="button" onClick={() => setActiveView("home")}>
+              ×
+            </button>
+          </div>
+
+          {!bootstrap || !isSignedIn ? (
+            <div className="settings-loading">请先登录账号。</div>
+          ) : (
+            <>
+              <div className="detail-row">
+                <span>邮箱</span>
+                <strong>{bootstrap.user.email ?? "未绑定邮箱"}</strong>
+              </div>
+              <div className="detail-row">
+                <span>会员</span>
+                <strong className="premium-badge">{bootstrap.entitlement.plan === "pro" ? "Premium" : "Free"}</strong>
+              </div>
+              <div className="detail-row">
+                <span>到期时间</span>
+                <strong>{bootstrap.entitlement.expiresAt ? new Date(bootstrap.entitlement.expiresAt).toLocaleDateString() : "长期可用"}</strong>
+              </div>
+              <button className="detail-action" type="button" onClick={startBilling}>个人中心</button>
+              <button className="detail-action" type="button" onClick={openOptions}>数据统计</button>
+              <div className="detail-stats">
+                <span>生词 {vocabCount}</span>
+                <span>例句 {sentenceCount}</span>
+                <span>练习 {practiceCount}</span>
+              </div>
+              <button className="detail-action muted" type="button" onClick={signOut}>退出登录</button>
             </>
           )}
         </section>
@@ -589,6 +772,16 @@ export function PopupApp() {
         </button>
       </nav>
     </main>
+  );
+}
+
+function FeatureCard({ icon, label, value, onClick }: { icon: ReactNode; label: string; value: number | string; onClick: () => void }) {
+  return (
+    <button className="feature-card" type="button" onClick={onClick}>
+      <span>{icon}</span>
+      <strong>{label}</strong>
+      <em>{value}</em>
+    </button>
   );
 }
 

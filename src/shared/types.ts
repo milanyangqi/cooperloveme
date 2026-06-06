@@ -372,6 +372,7 @@ export interface RuntimeRequestMap {
     items: Array<Pick<VocabItem, "text" | "language"> & Partial<Pick<VocabItem, "meaning" | "sourceSentence" | "translatedSentence">>>;
   };
   SAVE_SENTENCE: Omit<SentenceNote, "id" | "userId" | "createdAt" | "updatedAt" | "syncStatus">;
+  DELETE_SENTENCE: { id: string };
   SAVE_VOCAB: Omit<VocabItem, "id" | "userId" | "createdAt" | "updatedAt" | "syncStatus" | "mastery" | "normalizedText">;
   SAVE_PRACTICE_ATTEMPT: Omit<PracticeAttempt, "id" | "userId" | "createdAt" | "syncStatus">;
   TRANSLATE_CUES: { videoContext: VideoContext; cues: CaptionCue[]; targetLanguage: string };

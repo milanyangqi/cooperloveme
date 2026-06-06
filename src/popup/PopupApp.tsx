@@ -66,6 +66,7 @@ type WordbookPreview = {
 };
 
 type SentencePreview = {
+  id?: string;
   text?: string;
   translatedText?: string;
 };
@@ -214,7 +215,7 @@ export function PopupApp() {
     };
   }, [isDocked]);
 
-  const wakeSafeContentScript = async (message: string) => {
+  const wakeSafeContentScript = async (message: string, options: { reload?: boolean } = {}) => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url) {
       setStatus("没有找到当前标签页。");
@@ -281,10 +282,12 @@ export function PopupApp() {
       });
     }
 
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.dispatchEvent(new Event("yll-safe-reload"))
-    });
+    if (options.reload ?? true) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.dispatchEvent(new Event("yll-safe-reload"))
+      });
+    }
     setStatus(message);
   };
 
@@ -351,7 +354,7 @@ export function PopupApp() {
   const openPractice = async () => {
     try {
       setStatus("正在打开全屏混合练习...");
-      await wakeSafeContentScript("全屏混合练习已唤醒，请在 YouTube 页面查看。");
+      await wakeSafeContentScript("全屏混合练习已唤醒，请在 YouTube 页面查看。", { reload: false });
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) return;
       await chrome.scripting.executeScript({
@@ -439,7 +442,7 @@ export function PopupApp() {
   };
 
   const openOptions = async () => {
-    await chrome.runtime.openOptionsPage();
+    await chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
   };
 
   const dispatchActiveYouTubeEvent = async (eventName: string, openSettings = false) => {
@@ -676,6 +679,27 @@ export function PopupApp() {
     setStatus(response.data.deleted ? "单词已删除。" : "没有找到要删除的单词。");
     await reloadBootstrap();
     await refreshPageWords();
+  };
+
+  const deleteSentence = async (item: SentencePreview) => {
+    if (!item.id) {
+      setStatus("这条收藏句缺少本地 ID，无法删除。");
+      return;
+    }
+    const confirmed = window.confirm("确认删除这条收藏句？");
+    if (!confirmed) return;
+    const response = await sendRuntimeMessage<{ deleted: boolean }>({ type: "DELETE_SENTENCE", payload: { id: item.id } });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+    setBootstrap((current) => {
+      if (!current) return current;
+      const nextItems = (current.library.sentenceNotes as SentencePreview[]).filter((sentence) => sentence.id !== item.id);
+      return { ...current, library: { ...current.library, sentenceNotes: nextItems } };
+    });
+    setStatus(response.data.deleted ? "收藏句已删除。" : "没有找到要删除的收藏句。");
+    await reloadBootstrap();
   };
 
   const saveSentenceFromWord = async (word: PreviewWord) => {
@@ -983,8 +1007,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.142 待审核</strong>
-              <p>优化滑杆、云端拉取、功能卡和官方字幕轨道读取。</p>
+              <strong>0.1.143 待审核</strong>
+              <p>修复收藏句删除、本页生词兜底和混合练习入口。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -1272,13 +1296,26 @@ export function PopupApp() {
               {libraryTab === "sentences" ? (
                 <div className="popup-sentence-list">
                   {sentenceNotes.length ? sentenceNotes.map((item, index) => (
-                    <button key={`${item.text ?? "sentence"}-${index}`} type="button" onClick={openPractice}>
-                      <span>
-                        <em>{item.text ?? "未命名例句"}</em>
-                        <small>{item.translatedText ?? "译文待补充"}</small>
-                      </span>
-                      <ChevronRight size={15} />
-                    </button>
+                    <div className="popup-sentence-row" key={item.id ?? `${item.text ?? "sentence"}-${index}`}>
+                      <button type="button" onClick={openPractice}>
+                        <span>
+                          <em>{item.text ?? "未命名例句"}</em>
+                          <small>{item.translatedText ?? "译文待补充"}</small>
+                        </span>
+                        <ChevronRight size={15} />
+                      </button>
+                      <button
+                        className="sentence-delete"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void deleteSentence(item);
+                        }}
+                        title="删除收藏句"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   )) : (
                     <small>暂无收藏句。可在视频页点击“收藏当前句”。</small>
                   )}

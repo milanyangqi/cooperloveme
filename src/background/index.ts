@@ -52,13 +52,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeRequest, sender, sendRespo
 
 async function handleActionClick(tab: chrome.tabs.Tab): Promise<void> {
   if (!tab.id || !tab.url) {
-    await chrome.runtime.openOptionsPage();
+    await openBundledOptionsPage();
     return;
   }
 
   const parsed = new URL(tab.url);
   if (!parsed.hostname.includes("youtube.com")) {
-    await chrome.runtime.openOptionsPage();
+    await openBundledOptionsPage();
     return;
   }
 
@@ -67,6 +67,10 @@ async function handleActionClick(tab: chrome.tabs.Tab): Promise<void> {
     target: { tabId: tab.id },
     func: () => window.dispatchEvent(new Event("yll-toggle-popup-dock"))
   });
+}
+
+async function openBundledOptionsPage(): Promise<void> {
+  await chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
 }
 
 async function ensureCurrentContentScript(tabId: number): Promise<void> {
@@ -255,6 +259,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       notifyLibraryChanged();
       return saved;
     }
+
+    case "DELETE_SENTENCE":
+      return deleteSentenceNote(localUser.id, message.payload.id);
 
     case "SAVE_VOCAB": {
       const now = new Date().toISOString();
@@ -821,7 +828,13 @@ async function readActivePageWords(): Promise<{
           .toLowerCase()
           .replace(/^[^a-z]+|[^a-z]+$/g, "")
           .replace(/'{2,}/g, "'");
-      const rows = Array.isArray(page.__yllSafeRows) ? page.__yllSafeRows : [];
+      const rows = Array.isArray(page.__yllSafeRows) && page.__yllSafeRows.length
+        ? page.__yllSafeRows
+        : Array.from(document.querySelectorAll<HTMLElement>("#yll-lab-list-v2 .yll-row")).map((row) => ({
+          text: row.querySelector<HTMLElement>(".yll-text")?.textContent?.trim(),
+          translatedText: row.querySelector<HTMLElement>(".yll-translation")?.textContent?.trim(),
+          start: Number(row.dataset.start ?? "0")
+        }));
       const words = new Map<string, { text: string; sourceSentence?: string; translatedSentence?: string; firstStart: number }>();
 
       rows.forEach((row) => {
@@ -964,6 +977,15 @@ async function deleteVocabItem(userId: string, id: string): Promise<{ deleted: b
   if (!item || item.userId !== userId) return { deleted: false };
   await deleteRecord("vocabItems", id);
   await deleteRemoteRecordIfEnabled("yll_vocab_items", id);
+  notifyLibraryChanged();
+  return { deleted: true };
+}
+
+async function deleteSentenceNote(userId: string, id: string): Promise<{ deleted: boolean }> {
+  const item = await getRecord<SentenceNote>("sentenceNotes", id);
+  if (!item || item.userId !== userId) return { deleted: false };
+  await deleteRecord("sentenceNotes", id);
+  await deleteRemoteRecordIfEnabled("yll_sentence_notes", id);
   notifyLibraryChanged();
   return { deleted: true };
 }

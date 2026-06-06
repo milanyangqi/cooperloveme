@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.142";
+const SCRIPT_VERSION = "0.1.143";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -3070,7 +3070,24 @@ async function savePracticeAttempt(cue: LabCue, mode: "shadowing" | "dictation" 
 }
 
 function sortedPracticeRows() {
-  return [...(runtime.__yllSafeRows ?? [])].sort((a, b) => a.startMs - b.startMs);
+  const rows = runtime.__yllSafeRows?.length ? runtime.__yllSafeRows : rowsFromRenderedCaptionList();
+  return [...rows].sort((a, b) => a.startMs - b.startMs);
+}
+
+function rowsFromRenderedCaptionList(): LabCue[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(`#${LIST_ID} .yll-row[data-start]`))
+    .map((row): LabCue | undefined => {
+      const text = cleanText(row.querySelector<HTMLElement>(".yll-text")?.textContent ?? "");
+      if (!text) return undefined;
+      return {
+        startMs: Number(row.dataset.start ?? "0"),
+        durationMs: 1800,
+        text,
+        translatedText: cleanText(row.querySelector<HTMLElement>(".yll-translation")?.textContent ?? "") || undefined,
+        source: "official" as const
+      };
+    })
+    .filter((row): row is LabCue => Boolean(row));
 }
 
 function currentCueIndex(rows: LabCue[], cue: LabCue) {
@@ -5593,9 +5610,16 @@ window.addEventListener("popstate", () => window.setTimeout(start, 350));
 window.addEventListener("yll-open-practice", () => {
   void requireSignedInFeature("练习当前句").then((allowed) => {
     if (!allowed) return;
+    const renderedRows = rowsFromRenderedCaptionList();
+    if (renderedRows.length && !(runtime.__yllSafeRows ?? []).length) {
+      runtime.__yllSafeRows = renderedRows;
+      runtime.__yllSafeRowsGeneration = (runtime.__yllSafeRowsGeneration ?? 0) + 1;
+      openPracticeOverlay(renderedRows);
+      return;
+    }
     if (!(runtime.__yllSafeRows ?? []).length) {
       setStatus("正在读取字幕，稍后再打开练习模式。");
-      void loadRowsForCurrentVideo().then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
+      void loadRowsForCurrentVideo({ force: true, reason: "practice-open" }).then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
       return;
     }
     openPracticeOverlay();

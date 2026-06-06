@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 11:28:00 CST
+Last updated: 2026-06-07 11:45:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -415,6 +415,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - added `PULL_LIBRARY` and popup buttons for pulling Supabase learning data back into local IndexedDB
   - reduced signed-in home feature cards from 54px to 42px minimum height with tighter spacing
   - official caption loading now probes more YouTube player candidates and tries caption `baseUrl` as-is before mutating `fmt`
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.143` sentence delete, page-vocab fallback, practice entry, and options fallback:
+  - added `DELETE_SENTENCE` and popup delete buttons for saved sentence rows
+  - page-vocab extraction now falls back to rendered right-panel subtitle rows when the content-script row cache is temporarily unavailable
+  - opening mixed practice no longer dispatches a subtitle reload first, and practice can build rows from the rendered subtitle list
+  - popup option links now open extension `options.html` directly instead of calling `chrome.runtime.openOptionsPage()` without a manifest options page
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

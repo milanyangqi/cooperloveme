@@ -1,20 +1,20 @@
 # Supabase 会员后端说明
 
-这个项目保持“本地优先”：收藏句、词库、练习记录暂时仍在浏览器本地。Supabase 负责账号登录、会员状态、服务端权限快照、Stripe 订阅同步，以及后续云同步的基础设施。
+这个项目保持“本地优先”：收藏句、词库、练习记录先写入浏览器本地；登录并开启云同步后，会同步到 Supabase 学习数据表。Supabase 负责账号登录、会员状态、服务端权限快照、Stripe 订阅同步和学习数据云同步。
 
 ## 远端项目
 
 - 项目 ref：`ehmgfpksqyvtqqopuaii`
 - 项目 URL：`https://ehmgfpksqyvtqqopuaii.supabase.co`
 - 当前状态：`ACTIVE_HEALTHY`
-- 已应用迁移：`membership_v1`、`membership_security_fixes`、`entitlement_overrides`、`entitlement_override_read_policy`、`admin_console`、`admin_console_indexes`
+- 已应用迁移：`membership_v1`、`membership_security_fixes`、`entitlement_overrides`、`entitlement_override_read_policy`、`admin_console`、`admin_console_indexes`、`learning_data_sync`
 - 已部署函数：`me`、`billing-checkout`、`stripe-webhook`、`auth-callback`、`admin`
 - 邮箱验证落地页：`https://ehmgfpksqyvtqqopuaii.supabase.co/functions/v1/auth-callback`
 
 ## 架构
 
 - Supabase Auth 负责邮箱登录。Google OAuth 目前还没有启用。
-- Postgres 保存用户资料、Stripe customer ID、订阅状态、用量记录和管理员权限覆盖。
+- Postgres 保存用户资料、Stripe customer ID、订阅状态、用量记录、管理员权限覆盖和学习数据同步副本。
 - RLS 限制普通登录用户只能读取自己的资料、订阅状态、用量和覆盖记录。
 - Stripe Checkout 用于创建订阅。
 - Stripe webhook 用于把订阅状态同步回 Supabase。
@@ -29,6 +29,11 @@
 - `entitlement_overrides`：管理员手动设置的套餐、额度和功能覆盖。
 - `admin_users`：允许访问管理员后台的账号和角色。
 - `admin_audit_logs`：管理员权限操作审计记录。
+- `yll_wordbooks`：云同步词本。
+- `yll_vocab_items`：云同步生词。
+- `yll_sentence_notes`：云同步收藏句。
+- `yll_practice_attempts`：云同步练习记录。
+- `yll_settings`：云同步扩展设置。
 
 相关迁移文件：
 
@@ -38,6 +43,7 @@
 - `supabase/migrations/20260601004000_entitlement_override_read_policy.sql`
 - `supabase/migrations/20260601005000_admin_console.sql`
 - `supabase/migrations/20260601006000_admin_console_indexes.sql`
+- `supabase/migrations/20260606022000_learning_data_sync.sql`
 
 ## Edge Functions
 
@@ -105,6 +111,7 @@ https://ehmgfpksqyvtqqopuaii.supabase.co/functions/v1/stripe-webhook
 3. runtime message 支持注册、登录、退出和打开 Checkout。
 4. `GET_BOOTSTRAP` 会在有有效 token 时调用 `me`，否则回退到本地匿名模式。
 5. 本地学习记录仍然使用原本的匿名本地用户 ID 保存。
+6. 开启 `云同步` 后，后台会通过 Supabase REST 将词本、生词、收藏句、练习记录和设置 upsert 到 `yll_*` 表；设置页的 `立即同步到 Supabase` 会补传历史本地数据。
 
 ## 管理员后台
 

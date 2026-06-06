@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 22:09:00 CST
+Last updated: 2026-06-06 22:24:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -36,7 +36,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Sentence save / collection | In Review | 2026-06-04 17:49 CST | `0.1.94` restores per-row practice and save actions in the right-side caption list | Needs extension reload and Chrome review. |
 | Vocabulary library | In Review | 2026-06-06 21:59 CST | `0.1.132` makes popup `本页生词` read all deduped words from the current YouTube subtitle rows, adds scroll for long word lists, and lets `生词` add to the wordbook while `掌握` moves the word to the page mastered tab | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
-| Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
+| Cloud sync | In Review | 2026-06-06 22:24 CST | `0.1.134` adds authenticated Supabase REST sync for wordbooks, vocab, saved sentences, practice attempts, and settings, with cloud tables deployed by `learning_data_sync` | Needs extension reload and signed-in manual sync review. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Popup account login entry | In Review | 2026-06-06 19:57 CST | `0.1.126` keeps stale invalidated content scripts from refreshing overlays after extension reload | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
@@ -334,6 +334,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - popup and docked popup still own the learning/practice/settings entry points
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
+
+- Local `0.1.134` Supabase learning-data sync and popup navigation:
+  - docked popup/settings view scrolls again by restoring vertical overflow in dock mode
+  - settings page now exposes direct entries for `学习库 / 词本管理`, `打开混合练习`, and `立即同步到 Supabase`
+  - added local-to-Supabase sync for wordbooks, vocab items, sentence notes, practice attempts, and settings through authenticated REST upserts
+  - applied cloud migration `learning_data_sync` to project `ehmgfpksqyvtqqopuaii`, creating `yll_*` learning data tables with per-user RLS
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and signed-in Chrome sync review
 
 ### 2026-06-03
 

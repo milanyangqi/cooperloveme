@@ -255,6 +255,15 @@ export async function createBillingCheckout(): Promise<{ url: string }> {
   return (await response.json()) as { url: string };
 }
 
+export async function getSupabaseDataSession(): Promise<{ accessToken: string; expiresAt: number } | undefined> {
+  const session = await ensureFreshSession();
+  if (!session) return undefined;
+  return {
+    accessToken: session.accessToken,
+    expiresAt: session.expiresAt
+  };
+}
+
 export function getAdminAccess(): Promise<AdminAccessSnapshot> {
   return callAdmin<AdminAccessSnapshot>({ action: "me" });
 }

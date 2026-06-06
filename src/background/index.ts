@@ -7,6 +7,7 @@ import {
   createBillingCheckout,
   getAdminAccess,
   getAdminUserDetail,
+  getSupabaseDataSession,
   listAdminUsers,
   loadRemoteAccount,
   loadRemoteAccountWithFallback,
@@ -15,7 +16,9 @@ import {
   signUpWithEmail
 } from "./supabaseAuth";
 import { createId, normalizeText } from "../shared/ids";
+import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from "../shared/supabaseConfig";
 import type {
+  ExtensionSettings,
   PracticeAttempt,
   RuntimeRequest,
   RuntimeResponse,
@@ -202,13 +205,16 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       return clearAdminEntitlementOverride(message.payload.userId, message.payload.reason);
 
     case "UPDATE_SETTINGS":
-      return saveSettings(message.payload);
+      return saveSettingsAndMaybeSync(localUser.id, message.payload);
 
     case "UPDATE_SECRETS":
       return saveSecrets(message.payload);
 
     case "GET_LIBRARY":
       return loadLibrary(localUser.id);
+
+    case "SYNC_LIBRARY":
+      return syncLearningData(localUser.id);
 
     case "CREATE_WORDBOOK":
       return createWordbook(localUser.id, message.payload.name, message.payload.description);
@@ -232,7 +238,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
         updatedAt: now,
         syncStatus: "local-only"
       };
-      return putRecord("sentenceNotes", note);
+      const saved = await putRecord("sentenceNotes", note);
+      await syncRecordIfEnabled("sentenceNotes", saved);
+      return saved;
     }
 
     case "SAVE_VOCAB": {
@@ -251,7 +259,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
         updatedAt: now,
         syncStatus: "local-only"
       };
-      return putRecord("vocabItems", item);
+      const saved = await putRecord("vocabItems", item);
+      await syncRecordIfEnabled("vocabItems", saved);
+      return saved;
     }
 
     case "IMPORT_VOCAB": {
@@ -283,7 +293,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
           updatedAt: now,
           syncStatus: "local-only"
         };
-        imported.push(await putRecord("vocabItems", item));
+        const saved = await putRecord("vocabItems", item);
+        imported.push(saved);
+        await syncRecordIfEnabled("vocabItems", saved);
       }
 
       return { imported: imported.length, items: imported };
@@ -297,7 +309,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
         createdAt: new Date().toISOString(),
         syncStatus: "local-only"
       };
-      return putRecord("practiceAttempts", attempt);
+      const saved = await putRecord("practiceAttempts", attempt);
+      await syncRecordIfEnabled("practiceAttempts", saved);
+      return saved;
     }
 
     case "TRANSLATE_CUES": {
@@ -860,13 +874,16 @@ async function createWordbook(userId: string, name: string, description?: string
     updatedAt: now,
     syncStatus: "local-only"
   };
-  return putRecord("wordbooks", wordbook);
+  const saved = await putRecord("wordbooks", wordbook);
+  await syncRecordIfEnabled("wordbooks", saved);
+  return saved;
 }
 
 async function deleteVocabItem(userId: string, id: string): Promise<{ deleted: boolean }> {
   const item = await getRecord<VocabItem>("vocabItems", id);
   if (!item || item.userId !== userId) return { deleted: false };
   await deleteRecord("vocabItems", id);
+  await deleteRemoteRecordIfEnabled("yll_vocab_items", id);
   return { deleted: true };
 }
 
@@ -879,7 +896,9 @@ async function updateVocabMastery(userId: string, id: string, mastery: VocabItem
     updatedAt: new Date().toISOString(),
     syncStatus: "local-only"
   };
-  return putRecord("vocabItems", updated);
+  const saved = await putRecord("vocabItems", updated);
+  await syncRecordIfEnabled("vocabItems", saved);
+  return saved;
 }
 
 async function upsertVocabMastery(
@@ -920,7 +939,221 @@ async function upsertVocabMastery(
     updatedAt: now,
     syncStatus: "local-only"
   };
-  return putRecord("vocabItems", item);
+  const saved = await putRecord("vocabItems", item);
+  await syncRecordIfEnabled("vocabItems", saved);
+  return saved;
+}
+
+type SyncableStoreName = "wordbooks" | "vocabItems" | "sentenceNotes" | "practiceAttempts";
+type SyncableRecord = Wordbook | VocabItem | SentenceNote | PracticeAttempt;
+
+async function saveSettingsAndMaybeSync(userId: string, patch: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
+  const settings = await saveSettings(patch);
+  if (patch.syncEnabled === true) {
+    await syncLearningData(userId);
+  } else {
+    await syncSettingsIfEnabled(settings);
+  }
+  return settings;
+}
+
+async function syncLearningData(userId: string): Promise<{ synced: number; failed: number }> {
+  const settings = await loadSettings();
+  if (!settings.syncEnabled) throw new Error("请先在设置中开启云同步。");
+  const session = await getSupabaseDataSession();
+  if (!session) throw new Error("请先登录 Supabase 账号。");
+
+  const library = await loadLibrary(userId);
+  let synced = 0;
+  let failed = 0;
+
+  const syncBatch = async (storeName: SyncableStoreName, records: SyncableRecord[]) => {
+    if (!records.length) return;
+    try {
+      await upsertRemoteRows(remoteTableForStore(storeName), records.map((record) => remotePayloadForRecord(record)));
+      await Promise.all(records.map((record) => markRecordSynced(storeName, record)));
+      synced += records.length;
+    } catch {
+      failed += records.length;
+    }
+  };
+
+  await syncBatch("wordbooks", library.wordbooks);
+  await syncBatch("vocabItems", library.vocabItems);
+  await syncBatch("sentenceNotes", library.sentenceNotes);
+  await syncBatch("practiceAttempts", library.practiceAttempts);
+
+  try {
+    await upsertRemoteRows("yll_settings", [remoteSettingsPayload(settings)]);
+    synced += 1;
+  } catch {
+    failed += 1;
+  }
+
+  if (failed) {
+    throw new Error(`Supabase 同步失败：${synced} 条成功，${failed} 条失败。请确认云端学习数据表已部署。`);
+  }
+  return { synced, failed };
+}
+
+async function syncSettingsIfEnabled(settings: ExtensionSettings): Promise<void> {
+  if (!settings.syncEnabled) return;
+  try {
+    await upsertRemoteRows("yll_settings", [remoteSettingsPayload(settings)]);
+  } catch {
+    // Local settings remain authoritative when the network or cloud table is unavailable.
+  }
+}
+
+async function syncRecordIfEnabled(storeName: SyncableStoreName, record: SyncableRecord): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.syncEnabled) return;
+  try {
+    await upsertRemoteRows(remoteTableForStore(storeName), [remotePayloadForRecord(record)]);
+    await markRecordSynced(storeName, record);
+  } catch {
+    // Keep local-first writes usable. Manual "立即同步" reports aggregate failures.
+  }
+}
+
+async function deleteRemoteRecordIfEnabled(table: string, localId: string): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.syncEnabled) return;
+  const session = await getSupabaseDataSession();
+  if (!session) return;
+  const userId = userIdFromAccessToken(session.accessToken);
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?user_id=eq.${encodeURIComponent(userId)}&local_id=eq.${encodeURIComponent(localId)}`, {
+    method: "DELETE",
+    headers: supabaseRestHeaders(session.accessToken)
+  });
+  if (!response.ok) throw new Error(await readRestError(response));
+}
+
+async function upsertRemoteRows(table: string, rows: Array<Record<string, unknown>>): Promise<void> {
+  if (!rows.length) return;
+  const session = await getSupabaseDataSession();
+  if (!session) throw new Error("请先登录 Supabase 账号。");
+  const userId = userIdFromAccessToken(session.accessToken);
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=user_id,local_id`, {
+    method: "POST",
+    headers: supabaseRestHeaders(session.accessToken, {
+      Prefer: "resolution=merge-duplicates"
+    }),
+    body: JSON.stringify(rows.map((row) => ({ ...row, user_id: userId })))
+  });
+  if (!response.ok) throw new Error(await readRestError(response));
+}
+
+function userIdFromAccessToken(accessToken: string): string {
+  const [, payload] = accessToken.split(".");
+  if (!payload) throw new Error("Supabase access token 无效。");
+  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+  const decoded = JSON.parse(atob(normalized)) as { sub?: string };
+  if (!decoded.sub) throw new Error("Supabase access token 缺少用户 ID。");
+  return decoded.sub;
+}
+
+function supabaseRestHeaders(accessToken: string, extra: HeadersInit = {}): Headers {
+  const headers = new Headers(extra);
+  headers.set("apikey", SUPABASE_PUBLISHABLE_KEY);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  headers.set("Content-Type", "application/json");
+  return headers;
+}
+
+async function readRestError(response: Response): Promise<string> {
+  const data = (await response.json().catch(() => undefined)) as { message?: string; error?: string; details?: string } | undefined;
+  return data?.message ?? data?.error ?? data?.details ?? `Supabase REST failed: ${response.status}`;
+}
+
+function remoteTableForStore(storeName: SyncableStoreName): string {
+  return {
+    wordbooks: "yll_wordbooks",
+    vocabItems: "yll_vocab_items",
+    sentenceNotes: "yll_sentence_notes",
+    practiceAttempts: "yll_practice_attempts"
+  }[storeName];
+}
+
+function remotePayloadForRecord(record: SyncableRecord): Record<string, unknown> {
+  if ("name" in record) {
+    return {
+      local_id: record.id,
+      local_user_id: record.userId,
+      name: record.name,
+      description: record.description ?? null,
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+      payload: record
+    };
+  }
+  if ("normalizedText" in record) {
+    return {
+      local_id: record.id,
+      local_user_id: record.userId,
+      wordbook_local_id: record.wordbookId ?? null,
+      text: record.text,
+      normalized_text: record.normalizedText,
+      language: record.language,
+      meaning: record.meaning ?? null,
+      source_sentence: record.sourceSentence ?? null,
+      translated_sentence: record.translatedSentence ?? null,
+      video_id: record.videoId ?? null,
+      cue_id: record.cueId ?? null,
+      mastery: record.mastery,
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+      payload: record
+    };
+  }
+  if ("isFavorite" in record) {
+    return {
+      local_id: record.id,
+      local_user_id: record.userId,
+      video_id: record.videoId,
+      cue_id: record.cueId,
+      text: record.text,
+      translated_text: record.translatedText ?? null,
+      language: record.language,
+      start_ms: record.startMs,
+      duration_ms: record.durationMs,
+      note: record.note ?? null,
+      is_favorite: record.isFavorite,
+      created_at: record.createdAt,
+      updated_at: record.updatedAt,
+      payload: record
+    };
+  }
+  return {
+    local_id: record.id,
+    local_user_id: record.userId,
+    practice_item_id: record.practiceItemId,
+    cue_id: record.cueId,
+    mode: record.mode,
+    answer: record.answer ?? null,
+    expected: record.expected,
+    score: record.score,
+    speech_score: record.speechScore ?? null,
+    duration_ms: record.durationMs,
+    created_at: record.createdAt,
+    payload: record
+  };
+}
+
+function remoteSettingsPayload(settings: ExtensionSettings): Record<string, unknown> {
+  return {
+    local_id: "settings",
+    settings,
+    updated_at: settings.updatedAt
+  };
+}
+
+async function markRecordSynced(storeName: SyncableStoreName, record: SyncableRecord): Promise<void> {
+  if (record.syncStatus === "synced") return;
+  await putRecord(storeName, {
+    ...record,
+    syncStatus: "synced"
+  } as SyncableRecord);
 }
 
 async function guardQuota(userId: string, feature: UsageFeature, cost: number): Promise<void> {

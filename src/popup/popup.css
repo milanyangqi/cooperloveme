@@ -59,7 +59,7 @@ html.yll-dock-popup .popup {
   height: 100dvh;
   min-height: 100dvh;
   max-height: 100dvh;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .popup-header {

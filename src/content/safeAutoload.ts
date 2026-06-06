@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.133";
+const SCRIPT_VERSION = "0.1.134";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -5420,9 +5420,9 @@ window.addEventListener("yll-open-practice", () => {
   void requireSignedInFeature("练习当前句").then((allowed) => {
     if (!allowed) return;
     if (!(runtime.__yllSafeRows ?? []).length) {
-    setStatus("正在读取字幕，稍后再打开练习模式。");
-    void loadRowsForCurrentVideo().then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
-    return;
+      setStatus("正在读取字幕，稍后再打开练习模式。");
+      void loadRowsForCurrentVideo().then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
+      return;
     }
     openPracticeOverlay();
   });

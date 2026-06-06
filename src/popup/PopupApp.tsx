@@ -472,6 +472,17 @@ export function PopupApp() {
     setStatus("本地学习数据已导出。");
   };
 
+  const syncLibrary = async () => {
+    setStatus("正在同步学习数据到 Supabase...");
+    const response = await sendRuntimeMessage<{ synced: number; failed: number }>({ type: "SYNC_LIBRARY" });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+    setStatus(response.data.failed ? `同步完成：${response.data.synced} 条成功，${response.data.failed} 条失败。` : `已同步 ${response.data.synced} 条学习数据。`);
+    await reloadBootstrap();
+  };
+
   const refreshPageWords = async () => {
     const response = await sendRuntimeMessage<PageWordPayload>({ type: "READ_ACTIVE_PAGE_WORDS" });
     if (!response.ok) return;
@@ -744,8 +755,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.133 待审核</strong>
-              <p>右侧面板回归纯字幕显示，学习与练习入口移到 popup 设置页。</p>
+              <strong>0.1.134 待审核</strong>
+              <p>修复设置页滚动，并新增 Supabase 学习数据同步。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -794,7 +805,7 @@ export function PopupApp() {
                   checked={settings.enabled}
                   onChange={(checked) => void updateSettings({ enabled: checked })}
                 />
-                {isSignedIn ? <ActionSetting icon={<BookMarked size={17} />} label="词本管理" value={`${vocabCount} 个生词`} onClick={openLearningLibrary} /> : null}
+                {isSignedIn ? <ActionSetting icon={<BookMarked size={17} />} label="学习库 / 词本管理" value={`${vocabCount} 个生词`} onClick={openLearningLibrary} /> : null}
               </SettingsSection>
 
               <SettingsSection title="语言设置" accent>
@@ -832,6 +843,7 @@ export function PopupApp() {
 
               {isSignedIn ? (
                 <SettingsSection title="练习设置" accent>
+                  <ActionSetting icon={<Dumbbell size={17} />} label="打开混合练习" value={`${practiceCount} 次记录`} onClick={openPractice} />
                   <SwitchSetting
                     icon={<Dumbbell size={17} />}
                     label="逐句自动暂停"
@@ -867,6 +879,12 @@ export function PopupApp() {
                     label="云同步"
                     checked={settings.syncEnabled}
                     onChange={(checked) => void updateSettings({ syncEnabled: checked })}
+                  />
+                  <ActionSetting
+                    icon={<ShieldCheck size={17} />}
+                    label="立即同步到 Supabase"
+                    value="上传学习数据"
+                    onClick={syncLibrary}
                   />
                   <ActionSetting
                     icon={<Download size={17} />}

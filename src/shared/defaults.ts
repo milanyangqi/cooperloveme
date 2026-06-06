@@ -52,6 +52,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   playbackRate: 1,
   saveRawRecordings: false,
   syncEnabled: false,
+  siteAccessMode: "blacklist",
+  siteBlacklist: [],
+  siteWhitelist: ["youtube.com"],
   ai: {
     enabled: false,
     endpoint: "https://api.openai.com/v1/chat/completions",

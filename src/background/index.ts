@@ -222,6 +222,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
     case "CREATE_WORDBOOK":
       return createWordbook(localUser.id, message.payload.name, message.payload.description);
 
+    case "DELETE_WORDBOOK":
+      return deleteWordbook(localUser.id, message.payload.id);
+
     case "DELETE_VOCAB":
       return deleteVocabItem(localUser.id, message.payload.id);
 
@@ -849,17 +852,25 @@ async function loadLibrary(userId: string) {
     listByUser<UsageEvent>("usageEvents", userId)
   ]);
 
-  const mergedWordbooks = wordbooks.some((item) => item.id === defaultWordbook.id)
+  const mergedWordbooks = uniqueWordbooks(wordbooks.some((item) => item.id === defaultWordbook.id)
     ? wordbooks
-    : [defaultWordbook, ...wordbooks];
+    : [defaultWordbook, ...wordbooks]);
 
   return { wordbooks: mergedWordbooks, vocabItems, sentenceNotes, practiceAttempts, usageEvents };
 }
 
 async function ensureDefaultWordbook(userId: string): Promise<Wordbook> {
   const existing = await listByUser<Wordbook>("wordbooks", userId);
-  const found = existing.find((item) => item.name === "默认词本");
-  if (found) return found;
+  const defaults = existing
+    .filter((item) => normalizeWordbookName(item.name) === normalizeWordbookName("默认词本"))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const found = defaults[0];
+  if (found) {
+    if (defaults.length > 1) {
+      await mergeDuplicateDefaultWordbooks(userId, found, defaults.slice(1));
+    }
+    return found;
+  }
 
   return createWordbook(userId, "默认词本", "自动创建，用于保存未指定词本的单词。");
 }
@@ -869,7 +880,7 @@ async function createWordbook(userId: string, name: string, description?: string
   if (!cleanName) throw new Error("请输入词本名称。");
   const now = new Date().toISOString();
   const existing = await listByUser<Wordbook>("wordbooks", userId);
-  const duplicate = existing.find((item) => item.name.trim().toLowerCase() === cleanName.toLowerCase());
+  const duplicate = existing.find((item) => normalizeWordbookName(item.name) === normalizeWordbookName(cleanName));
   if (duplicate) return duplicate;
 
   const wordbook: Wordbook = {
@@ -885,6 +896,55 @@ async function createWordbook(userId: string, name: string, description?: string
   await syncRecordIfEnabled("wordbooks", saved);
   notifyLibraryChanged();
   return saved;
+}
+
+async function mergeDuplicateDefaultWordbooks(userId: string, canonical: Wordbook, duplicates: Wordbook[]): Promise<void> {
+  const duplicateIds = new Set(duplicates.map((item) => item.id));
+  const vocabItems = await listByUser<VocabItem>("vocabItems", userId);
+  await Promise.all(vocabItems
+    .filter((item) => item.wordbookId && duplicateIds.has(item.wordbookId))
+    .map((item) => putRecord("vocabItems", {
+      ...item,
+      wordbookId: canonical.id,
+      updatedAt: new Date().toISOString(),
+      syncStatus: "local-only"
+    })));
+  await Promise.all(duplicates.map((item) => deleteRecord("wordbooks", item.id)));
+  notifyLibraryChanged();
+}
+
+function uniqueWordbooks(wordbooks: Wordbook[]): Wordbook[] {
+  const byKey = new Map<string, Wordbook>();
+  for (const wordbook of wordbooks) {
+    const key = normalizeWordbookName(wordbook.name);
+    const existing = byKey.get(key);
+    if (!existing || wordbook.createdAt.localeCompare(existing.createdAt) < 0) {
+      byKey.set(key, wordbook);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function normalizeWordbookName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function deleteWordbook(userId: string, id: string): Promise<{ deleted: boolean; deletedVocab: number }> {
+  const wordbook = await getRecord<Wordbook>("wordbooks", id);
+  if (!wordbook || wordbook.userId !== userId) return { deleted: false, deletedVocab: 0 };
+  if (normalizeWordbookName(wordbook.name) === normalizeWordbookName("默认词本")) {
+    throw new Error("默认词本不能删除。");
+  }
+  const vocabItems = await listByUser<VocabItem>("vocabItems", userId);
+  const toDelete = vocabItems.filter((item) => item.wordbookId === id);
+  await Promise.all(toDelete.map((item) => deleteRecord("vocabItems", item.id)));
+  await deleteRecord("wordbooks", id);
+  await Promise.all([
+    deleteRemoteRecordIfEnabled("yll_wordbooks", id),
+    ...toDelete.map((item) => deleteRemoteRecordIfEnabled("yll_vocab_items", item.id))
+  ]);
+  notifyLibraryChanged();
+  return { deleted: true, deletedVocab: toDelete.length };
 }
 
 async function deleteVocabItem(userId: string, id: string): Promise<{ deleted: boolean }> {

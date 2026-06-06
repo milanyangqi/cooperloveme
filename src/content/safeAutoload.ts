@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.137";
+const SCRIPT_VERSION = "0.1.138";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -4976,33 +4976,62 @@ async function loadDirectTimedTextRows(videoId: string) {
   const textTrackLanguages = Array.from(getMainVideo()?.textTracks ?? [])
     .map((track) => track.language)
     .filter((language) => language && language.startsWith("en"));
-  const languageCandidates = Array.from(new Set(["en", "en-US", "en-GB", ...textTrackLanguages]));
+  const listedTracks = await loadTimedTextList(videoId).catch((error) => {
+    addDebugLog("timedtext-list:failed", { error: toErrorMessage(error) });
+    return [];
+  });
+  const languageCandidates = Array.from(new Set(["en", "en-US", "en-GB", ...textTrackLanguages, ...listedTracks.map((track) => track.languageCode)]));
   const failures: string[] = [];
-  for (const languageCode of languageCandidates) {
-    for (const kind of [undefined, "asr"] as const) {
+  const directCandidates = [
+    ...listedTracks.map((track) => ({ languageCode: track.languageCode, kind: track.kind, name: track.name })),
+    ...languageCandidates.flatMap((languageCode) => ([{ languageCode, kind: undefined, name: undefined }, { languageCode, kind: "asr", name: undefined }] as const))
+  ];
+  const seen = new Set<string>();
+  for (const candidate of directCandidates) {
+    const key = `${candidate.languageCode}:${candidate.kind ?? ""}:${candidate.name ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    for (const format of ["json3", "srv3", "vtt"]) {
       const url = new URL("https://www.youtube.com/api/timedtext");
       url.searchParams.set("v", videoId);
-      url.searchParams.set("lang", languageCode);
-      url.searchParams.set("fmt", "json3");
-      if (kind) url.searchParams.set("kind", kind);
+      url.searchParams.set("lang", candidate.languageCode);
+      url.searchParams.set("fmt", format);
+      if (candidate.kind) url.searchParams.set("kind", candidate.kind);
+      if (candidate.name) url.searchParams.set("name", candidate.name);
 
       try {
         const text = await fetchCaptionText(url.toString());
         if (!text.trim()) {
-          failures.push(`${languageCode}/${kind ?? "manual"}:empty`);
+          failures.push(`${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:empty`);
           continue;
         }
         const rows = parseCaptionBody(videoId, text, "timedtext");
         if (rows.length) return mergeAdjacentCues(rows);
-        failures.push(`${languageCode}/${kind ?? "manual"}:parsed=0 body=${text.length}`);
+        failures.push(`${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:parsed=0 body=${text.length}`);
       } catch (error) {
-        failures.push(`${languageCode}/${kind ?? "manual"}:${toErrorMessage(error).slice(0, 120)}`);
+        failures.push(`${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:${toErrorMessage(error).slice(0, 120)}`);
         continue;
       }
     }
   }
   addDebugLog("direct-timedtext:failed", { failures: failures.slice(0, 6) });
   return [];
+}
+
+async function loadTimedTextList(videoId: string) {
+  const url = new URL("https://www.youtube.com/api/timedtext");
+  url.searchParams.set("type", "list");
+  url.searchParams.set("v", videoId);
+  const body = await fetchCaptionText(url.toString());
+  const doc = new DOMParser().parseFromString(body, "text/xml");
+  return Array.from(doc.querySelectorAll("track"))
+    .map((track) => ({
+      languageCode: track.getAttribute("lang_code") ?? "",
+      kind: track.getAttribute("kind") || undefined,
+      name: track.getAttribute("name") || undefined
+    }))
+    .filter((track) => track.languageCode)
+    .sort((left, right) => Number(right.languageCode.startsWith("en")) - Number(left.languageCode.startsWith("en")));
 }
 
 function readTextTrackRows() {

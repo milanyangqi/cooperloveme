@@ -46,7 +46,7 @@ type PopupBootstrap = {
   };
 };
 
-type PopupView = "home" | "settings" | "account" | "library";
+type PopupView = "home" | "settings" | "account" | "library" | "siteAccess";
 
 type VocabPreview = {
   id?: string;
@@ -62,6 +62,7 @@ type VocabPreview = {
 type WordbookPreview = {
   id?: string;
   name?: string;
+  createdAt?: string;
 };
 
 type SentencePreview = {
@@ -144,6 +145,8 @@ export function PopupApp() {
   const [wordActionBusy, setWordActionBusy] = useState("");
   const [libraryWordbookId, setLibraryWordbookId] = useState("");
   const [newWordbookName, setNewWordbookName] = useState("");
+  const [sitePattern, setSitePattern] = useState("");
+  const [activePageVideoId, setActivePageVideoId] = useState("");
 
   const syncPopupHeightWithCaptionPanel = async () => {
     if (isDocked) {
@@ -190,6 +193,7 @@ export function PopupApp() {
     }
     if (wordsResponse.ok) {
       setPageWords(wordsResponse.data.words);
+      setActivePageVideoId(wordsResponse.data.videoId ?? "");
     }
     if (!response.ok) setStatus(response.error);
   };
@@ -479,6 +483,29 @@ export function PopupApp() {
     await reloadBootstrap();
   };
 
+  const deleteLibraryWordbook = async () => {
+    const selectedWordbook = wordbooks.find((wordbook) => wordbook.id === selectedLibraryWordbookId);
+    if (!selectedWordbook?.id) {
+      setStatus("请选择要删除的词本。");
+      return;
+    }
+    if ((selectedWordbook.name ?? "").trim() === "默认词本") {
+      setStatus("默认词本不能删除。");
+      return;
+    }
+    const confirmed = window.confirm(`确认删除词本「${selectedWordbook.name ?? "未命名词本"}」？该词本内的单词也会删除。`);
+    if (!confirmed) return;
+    const response = await sendRuntimeMessage<{ deleted: boolean; deletedVocab: number }>({ type: "DELETE_WORDBOOK", payload: { id: selectedWordbook.id } });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+    setLibraryWordbookId("");
+    setStatus(response.data.deleted ? `词本已删除，同时删除 ${response.data.deletedVocab} 个单词。` : "没有找到要删除的词本。");
+    await reloadBootstrap();
+    await refreshPageWords();
+  };
+
   const exportCurrentWordbook = () => {
     const selectedWordbook = wordbooks.find((wordbook) => wordbook.id === selectedLibraryWordbookId);
     const rows = [
@@ -554,6 +581,7 @@ export function PopupApp() {
     const response = await sendRuntimeMessage<PageWordPayload>({ type: "READ_ACTIVE_PAGE_WORDS" });
     if (!response.ok) return;
     setPageWords(response.data.words);
+    setActivePageVideoId(response.data.videoId ?? "");
   };
 
   const savePreviewWord = async (word: PreviewWord, mastery: VocabItem["mastery"], message: string) => {
@@ -616,6 +644,54 @@ export function PopupApp() {
     await refreshPageWords();
   };
 
+  const saveSentenceFromWord = async (word: PreviewWord) => {
+    const text = word.sourceSentence?.trim();
+    if (!text) {
+      setStatus("这个单词没有对应的字幕句子。");
+      return;
+    }
+    const response = await sendRuntimeMessage<SentencePreview>({
+      type: "SAVE_SENTENCE",
+      payload: {
+        videoId: activePageVideoId || "unknown",
+        cueId: `page-word:${normalizePreviewWord(word.text)}`,
+        text,
+        translatedText: word.translatedSentence,
+        language: "en",
+        startMs: 0,
+        durationMs: 0,
+        isFavorite: true
+      }
+    });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+    setStatus("该句已收藏。");
+    await reloadBootstrap();
+  };
+
+  const addSiteRule = async () => {
+    const pattern = cleanSitePattern(sitePattern);
+    if (!pattern) {
+      setStatus("请输入网站域名或通配符。");
+      return;
+    }
+    const listKey = settings?.siteAccessMode === "whitelist" ? "siteWhitelist" : "siteBlacklist";
+    const current = settings?.[listKey] ?? [];
+    if (current.includes(pattern)) {
+      setStatus("该网站已在列表中。");
+      return;
+    }
+    setSitePattern("");
+    await updateSettings({ [listKey]: [...current, pattern] } as Partial<ExtensionSettings>);
+  };
+
+  const removeSiteRule = async (pattern: string, listKey: "siteBlacklist" | "siteWhitelist") => {
+    const current = settings?.[listKey] ?? [];
+    await updateSettings({ [listKey]: current.filter((item) => item !== pattern) } as Partial<ExtensionSettings>);
+  };
+
   const updateSettings = async (patch: Partial<ExtensionSettings>) => {
     if (!settingsDraft) return;
 
@@ -647,8 +723,9 @@ export function PopupApp() {
   const sentenceCount = bootstrap?.library.sentenceNotes.length ?? 0;
   const practiceCount = bootstrap?.library.practiceAttempts.length ?? 0;
   const vocabItems = (bootstrap?.library.vocabItems as VocabPreview[] | undefined) ?? [];
-  const wordbooks = (bootstrap?.library.wordbooks as WordbookPreview[] | undefined) ?? [];
+  const wordbooks = uniqueWordbookPreviews((bootstrap?.library.wordbooks as WordbookPreview[] | undefined) ?? []);
   const sentenceNotes = (bootstrap?.library.sentenceNotes as SentencePreview[] | undefined) ?? [];
+  const settings = settingsDraft;
   const masteredCount = vocabItems.filter((item) => item.mastery && item.mastery >= 4).length;
   const recentSentences = sentenceNotes.slice(0, 4);
   const savedByKey = new Map(vocabItems.map((item) => [normalizePreviewWord(item.normalizedText ?? item.text ?? ""), item]));
@@ -667,9 +744,10 @@ export function PopupApp() {
   const pageNewWords = currentPageWords.filter((word) => word.mastery < 4);
   const pageMasteredWords = currentPageWords.filter((word) => word.mastery >= 4);
   const selectedLibraryWordbookId = libraryWordbookId || wordbooks[0]?.id || "";
+  const selectedLibraryWordbook = wordbooks.find((wordbook) => wordbook.id === selectedLibraryWordbookId);
   const libraryWords = vocabItems.filter((item) => !selectedLibraryWordbookId || item.wordbookId === selectedLibraryWordbookId);
+  const currentSiteRules = settings?.siteAccessMode === "whitelist" ? settings.siteWhitelist : settings?.siteBlacklist ?? [];
   const accountBadge = !bootstrap ? "LOADING" : isSignedIn ? "SIGNED IN" : "LOCAL";
-  const settings = settingsDraft;
 
   return (
     <main className="popup">
@@ -718,7 +796,7 @@ export function PopupApp() {
                     checked={settings.showDualSubtitles}
                     onChange={(checked) => void updateSettings({ showDualSubtitles: checked })}
                   />
-                  <ActionSetting icon={<Settings size={17} />} label="youtube.com" value="管理黑名单" onClick={() => setActiveView("settings")} />
+                  <ActionSetting icon={<Settings size={17} />} label="youtube.com" value="管理黑名单" onClick={() => setActiveView("siteAccess")} />
                 </section>
               ) : null}
 
@@ -744,6 +822,7 @@ export function PopupApp() {
                         saveLabel={item.saved ? "已收" : "生词"}
                         onSave={() => void savePreviewWord(item, 0, item.saved ? "已在生词库中。" : "已添加到生词库。")}
                         onMaster={() => void savePreviewWord(item, 5, "已移动到已掌握。")}
+                        onSaveSentence={() => void saveSentenceFromWord(item)}
                         onOpen={openLearningLibrary}
                       />
                     ))}
@@ -759,6 +838,7 @@ export function PopupApp() {
                         saveLabel="生词"
                         onSave={() => void savePreviewWord(item, 0, "已移回本页生词。")}
                         onMaster={() => void savePreviewWord(item, 5, "已在已掌握列表中。")}
+                        onSaveSentence={() => void saveSentenceFromWord(item)}
                         onOpen={openLearningLibrary}
                       />
                     ))}
@@ -866,8 +946,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.137 待审核</strong>
-              <p>优化字幕早期 fallback、词本删除和 Supabase 同步提示。</p>
+              <strong>0.1.138 待审核</strong>
+              <p>修复默认词本重复、词本删除和黑白名单管理。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -875,6 +955,77 @@ export function PopupApp() {
             </span>
           </section>
         </>
+      ) : activeView === "siteAccess" ? (
+        <section className="site-access-view">
+          <div className="subpage-title">
+            <button type="button" onClick={() => setActiveView("home")}>
+              <ChevronRight size={17} />
+            </button>
+            <strong>管理黑白名单</strong>
+            <button type="button" onClick={() => setActiveView("home")}>
+              ×
+            </button>
+          </div>
+
+          {!settings ? (
+            <div className="settings-loading">正在读取设置...</div>
+          ) : (
+            <>
+              <div className="site-mode-card">
+                <button
+                  className={settings.siteAccessMode === "blacklist" ? "active" : ""}
+                  type="button"
+                  onClick={() => void updateSettings({ siteAccessMode: "blacklist" })}
+                >
+                  <span>
+                    <strong>黑名单功能</strong>
+                    <small>加入黑名单内的网站将不支持 Language Lab 功能</small>
+                  </span>
+                  <CheckCircle2 size={17} />
+                </button>
+                <button
+                  className={settings.siteAccessMode === "whitelist" ? "active" : ""}
+                  type="button"
+                  onClick={() => void updateSettings({ siteAccessMode: "whitelist" })}
+                >
+                  <span>
+                    <strong>白名单功能</strong>
+                    <small>加入白名单内的网站将才会支持 Language Lab 功能</small>
+                  </span>
+                  <CheckCircle2 size={17} />
+                </button>
+              </div>
+
+              <div className="site-list-editor">
+                <strong>网址列表</strong>
+                <input
+                  type="text"
+                  placeholder="可搜索、添加网址、通配符"
+                  value={sitePattern}
+                  onChange={(event) => setSitePattern(event.target.value)}
+                />
+                <button type="button" onClick={addSiteRule}>添加</button>
+                <div className="site-rule-list">
+                  {currentSiteRules.length ? currentSiteRules.map((pattern) => (
+                    <div className="site-rule-row" key={pattern}>
+                      <span>{pattern}</span>
+                      <em>子域名匹配</em>
+                      <button
+                        type="button"
+                        onClick={() => void removeSiteRule(pattern, settings.siteAccessMode === "whitelist" ? "siteWhitelist" : "siteBlacklist")}
+                        title="删除"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  )) : (
+                    <small>当前列表为空。</small>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       ) : activeView === "settings" ? (
         <section className="popup-settings">
           <div className="settings-title-row">
@@ -1043,6 +1194,14 @@ export function PopupApp() {
                   ))}
                 </select>
                 <button type="button" onClick={syncLibrary}>同步</button>
+                <button
+                  type="button"
+                  onClick={deleteLibraryWordbook}
+                  disabled={!selectedLibraryWordbook?.id || selectedLibraryWordbook.name === "默认词本"}
+                  title="删除当前词本"
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
               <div className="library-manage">
                 <input
@@ -1169,6 +1328,7 @@ function PreviewWordRow({
   saveLabel,
   onSave,
   onMaster,
+  onSaveSentence,
   onOpen
 }: {
   item: PreviewWord;
@@ -1176,6 +1336,7 @@ function PreviewWordRow({
   saveLabel: string;
   onSave: () => void;
   onMaster: () => void;
+  onSaveSentence: () => void;
   onOpen: () => void;
 }) {
   const saveBusy = busyKey === `${item.text}:0`;
@@ -1198,6 +1359,10 @@ function PreviewWordRow({
           <CheckCircle2 size={14} />
           <span>掌握</span>
         </button>
+        <button type="button" onClick={onSaveSentence} disabled={!item.sourceSentence} title="收藏该单词所在字幕句">
+          <BookMarked size={14} />
+          <span>收藏句</span>
+        </button>
       </div>
     </div>
   );
@@ -1213,6 +1378,23 @@ function csvCell(value: string): string {
 
 function safeFilename(value: string): string {
   return value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").slice(0, 48) || "wordbook";
+}
+
+function cleanSitePattern(value: string): string {
+  const trimmed = value.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+  return trimmed.toLowerCase().replace(/\s+/g, "");
+}
+
+function uniqueWordbookPreviews(wordbooks: WordbookPreview[]): WordbookPreview[] {
+  const byName = new Map<string, WordbookPreview>();
+  for (const wordbook of wordbooks) {
+    const key = (wordbook.name ?? "默认词本").trim().toLowerCase();
+    const existing = byName.get(key);
+    if (!existing || (wordbook.createdAt ?? "").localeCompare(existing.createdAt ?? "") < 0) {
+      byName.set(key, wordbook);
+    }
+  }
+  return Array.from(byName.values());
 }
 
 function previewEmptyText(tab: PreviewTab, totalPageWords: number): string {

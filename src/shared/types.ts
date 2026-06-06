@@ -321,6 +321,9 @@ export interface ExtensionSettings {
   playbackRate: number;
   saveRawRecordings: boolean;
   syncEnabled: boolean;
+  siteAccessMode: "blacklist" | "whitelist";
+  siteBlacklist: string[];
+  siteWhitelist: string[];
   ai: AiSettings;
   updatedAt: string;
 }
@@ -352,6 +355,7 @@ export interface RuntimeRequestMap {
   UPDATE_SECRETS: Partial<SecretSettings>;
   GET_LIBRARY: undefined;
   CREATE_WORDBOOK: { name: string; description?: string };
+  DELETE_WORDBOOK: { id: string };
   DELETE_VOCAB: { id: string };
   UPDATE_VOCAB_MASTERY: { id: string; mastery: VocabItem["mastery"] };
   UPSERT_VOCAB_MASTERY: {

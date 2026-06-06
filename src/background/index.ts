@@ -1,5 +1,5 @@
 import { translateCuesWithAi, explainSelection, scoreSpeechWithAi } from "./ai";
-import { buildExportBundle, clearAllStores, listByUser, putRecord } from "./db";
+import { buildExportBundle, clearAllStores, deleteRecord, getRecord, listByUser, putRecord } from "./db";
 import { ensureLocalUser, loadEntitlement, loadSecrets, loadSettings, saveSecrets, saveSettings } from "./settings";
 import {
   clearAdminEntitlementOverride,
@@ -209,6 +209,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
 
     case "CREATE_WORDBOOK":
       return createWordbook(localUser.id, message.payload.name, message.payload.description);
+
+    case "DELETE_VOCAB":
+      return deleteVocabItem(localUser.id, message.payload.id);
 
     case "SAVE_SENTENCE": {
       const now = new Date().toISOString();
@@ -786,6 +789,13 @@ async function createWordbook(userId: string, name: string, description?: string
     syncStatus: "local-only"
   };
   return putRecord("wordbooks", wordbook);
+}
+
+async function deleteVocabItem(userId: string, id: string): Promise<{ deleted: boolean }> {
+  const item = await getRecord<VocabItem>("vocabItems", id);
+  if (!item || item.userId !== userId) return { deleted: false };
+  await deleteRecord("vocabItems", id);
+  return { deleted: true };
 }
 
 async function guardQuota(userId: string, feature: UsageFeature, cost: number): Promise<void> {

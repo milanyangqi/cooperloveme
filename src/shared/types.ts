@@ -352,6 +352,7 @@ export interface RuntimeRequestMap {
   UPDATE_SECRETS: Partial<SecretSettings>;
   GET_LIBRARY: undefined;
   CREATE_WORDBOOK: { name: string; description?: string };
+  DELETE_VOCAB: { id: string };
   IMPORT_VOCAB: {
     wordbookId?: string;
     items: Array<Pick<VocabItem, "text" | "language"> & Partial<Pick<VocabItem, "meaning" | "sourceSentence" | "translatedSentence">>>;

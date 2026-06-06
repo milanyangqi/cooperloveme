@@ -630,8 +630,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.126 待审核</strong>
-              <p>新增多词本管理、单词导入导出，并加速当前字幕翻译。</p>
+              <strong>0.1.127 待审核</strong>
+              <p>词本单词支持手动删除，学习库面板改为占满字幕容器内容区。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

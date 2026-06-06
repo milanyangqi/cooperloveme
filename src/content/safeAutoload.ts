@@ -77,6 +77,7 @@ type LibrarySentence = {
 };
 
 type LibraryVocab = {
+  id: string;
   text?: string;
   normalizedText?: string;
   language?: string;
@@ -136,7 +137,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.126";
+const SCRIPT_VERSION = "0.1.127";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -915,6 +916,9 @@ function installStyle() {
       overscroll-behavior: contain;
       scrollbar-color: rgba(255,255,255,.38) transparent;
     }
+    #${PANEL_ID}.yll-library-open #${LIST_ID} {
+      display: none;
+    }
     #${LIST_ID} .yll-row {
       display: grid;
       grid-template-columns: 52px minmax(0, 1fr);
@@ -1135,8 +1139,8 @@ function installStyle() {
     }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
     #${LIBRARY_PANEL_ID} {
-      flex: 0 0 auto;
-      max-height: 420px;
+      flex: 1 1 auto;
+      min-height: 0;
       margin: 8px 12px 12px;
       padding: 14px;
       color: #f7f8f8;
@@ -1145,7 +1149,7 @@ function installStyle() {
       border-radius: 8px;
       box-shadow: 0 10px 24px rgba(0,0,0,.26);
       font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      overflow-y: auto;
+      overflow: visible;
     }
     #${LIBRARY_PANEL_ID} .yll-library-head {
       display: flex;
@@ -1246,10 +1250,34 @@ function installStyle() {
       border: 1px solid rgba(255,255,255,.14);
     }
     #${LIBRARY_PANEL_ID} .yll-library-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
       padding: 8px 0;
       border-top: 1px solid rgba(255,255,255,.08);
     }
+    #${LIBRARY_PANEL_ID} .yll-library-item-text {
+      min-width: 0;
+    }
     #${LIBRARY_PANEL_ID} .yll-library-item:first-of-type { border-top: 0; }
+    #${LIBRARY_PANEL_ID} .yll-library-delete {
+      min-width: 48px;
+      height: 28px;
+      padding: 0 9px;
+      color: #ffdbdb;
+      background: rgba(255,86,86,.12);
+      border: 1px solid rgba(255,120,120,.25);
+      border-radius: 7px;
+      font-weight: 760;
+      cursor: pointer;
+    }
+    #${LIBRARY_PANEL_ID} .yll-library-delete:hover,
+    #${LIBRARY_PANEL_ID} .yll-library-delete:focus {
+      color: #fff;
+      background: rgba(255,86,86,.28);
+      outline: none;
+    }
     #${LIBRARY_PANEL_ID} .yll-library-main {
       color: #fff;
       font-weight: 720;
@@ -1726,6 +1754,7 @@ async function toggleLibraryPanel(options: { forceOpen?: boolean } = {}) {
 
   const panel = document.createElement("section");
   panel.id = LIBRARY_PANEL_ID;
+  document.getElementById(PANEL_ID)?.classList.add("yll-library-open");
   panel.innerHTML = `
     <div class="yll-library-head">
       <h3>本地学习库</h3>
@@ -1764,6 +1793,7 @@ async function toggleLibraryPanel(options: { forceOpen?: boolean } = {}) {
 
 function closeLibraryPanel() {
   runtime.__yllSafeLibraryOpen = false;
+  document.getElementById(PANEL_ID)?.classList.remove("yll-library-open");
   document.getElementById(LIBRARY_PANEL_ID)?.remove();
 }
 
@@ -1818,10 +1848,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       main: item.text ?? "",
       sub: item.translatedText ?? formatLibraryTime(item.createdAt)
     }))}
-    ${renderLibrarySection(`当前词本：${selectedWordbook?.name ?? "默认词本"}`, wordbookVocabItems.slice(0, 12), (item) => ({
-      main: item.text ?? "",
-      sub: item.meaning || item.sourceSentence || formatLibraryTime(item.createdAt)
-    }))}
+    ${renderVocabLibrarySection(`当前词本：${selectedWordbook?.name ?? "默认词本"}`, wordbookVocabItems)}
     ${renderLibrarySection("最近练习", practiceAttempts.slice(0, 6), (item) => ({
       main: `${practiceModeLabel(item.mode)} · ${Math.round(Number(item.score ?? 0))} 分`,
       sub: item.expected || formatLibraryTime(item.createdAt)
@@ -1897,6 +1924,33 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
     } finally {
       input.value = "";
     }
+  });
+  panel.querySelectorAll<HTMLButtonElement>("[data-vocab-delete]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.getAttribute("data-vocab-delete");
+      if (!id) return;
+      const originalLabel = button.textContent ?? "删除";
+      button.disabled = true;
+      button.textContent = "删除中";
+      try {
+        const response = await sendRuntimeMessage<{ deleted: boolean }>({ type: "DELETE_VOCAB", payload: { id } });
+        if (!response?.ok) throw new Error(response?.error ?? "删除失败");
+        const updated = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
+        if (!updated?.ok) throw new Error(updated?.error ?? "刷新学习库失败");
+        renderLibraryPanel(panel, updated.data ?? {});
+        setStatus(response.data.deleted ? "已删除单词。" : "单词已不存在。");
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = `失败`;
+        button.title = toErrorMessage(error);
+        window.setTimeout(() => {
+          button.textContent = originalLabel;
+          button.title = "";
+        }, 1600);
+      }
+    });
   });
   panel.querySelector<HTMLButtonElement>("[data-library-export-json]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
@@ -2154,11 +2208,33 @@ function renderLibrarySection<T>(title: string, items: T[], render: (item: T) =>
       const rendered = render(item);
       return `
         <div class="yll-library-item">
-          <div class="yll-library-main">${escapeHtml(rendered.main || "未命名")}</div>
-          ${rendered.sub ? `<div class="yll-library-sub">${escapeHtml(rendered.sub)}</div>` : ""}
+          <div class="yll-library-item-text">
+            <div class="yll-library-main">${escapeHtml(rendered.main || "未命名")}</div>
+            ${rendered.sub ? `<div class="yll-library-sub">${escapeHtml(rendered.sub)}</div>` : ""}
+          </div>
         </div>
       `;
     }).join("")
+    : `<div class="yll-library-empty">暂无记录</div>`;
+  return `
+    <section class="yll-library-section">
+      <h4>${escapeHtml(title)}</h4>
+      ${body}
+    </section>
+  `;
+}
+
+function renderVocabLibrarySection(title: string, items: LibraryVocab[]) {
+  const body = items.length
+    ? items.map((item) => `
+      <div class="yll-library-item">
+        <div class="yll-library-item-text">
+          <div class="yll-library-main">${escapeHtml(item.text || "未命名")}</div>
+          <div class="yll-library-sub">${escapeHtml(item.meaning || item.sourceSentence || formatLibraryTime(item.createdAt))}</div>
+        </div>
+        <button class="yll-library-delete" type="button" data-vocab-delete="${escapeHtml(item.id)}">删除</button>
+      </div>
+    `).join("")
     : `<div class="yll-library-empty">暂无记录</div>`;
   return `
     <section class="yll-library-section">

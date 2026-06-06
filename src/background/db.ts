@@ -73,6 +73,14 @@ export async function putRecord<T extends StoreRecord>(storeName: StoreName, rec
   return record;
 }
 
+export async function getRecord<T extends StoreRecord>(storeName: StoreName, id: string): Promise<T | undefined> {
+  return withStore<T>(storeName, "readonly", (store) => store.get(id));
+}
+
+export async function deleteRecord(storeName: StoreName, id: string): Promise<void> {
+  await withStore(storeName, "readwrite", (store) => store.delete(id));
+}
+
 export async function listByUser<T extends StoreRecord>(storeName: StoreName, userId: string): Promise<T[]> {
   const db = await openDatabase();
 

@@ -41,7 +41,7 @@ export const PRO_FEATURES: Record<FeatureKey, boolean> = {
 };
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   enabled: true,
   sourceLanguage: "en",
   targetLanguage: "zh-Hans",
@@ -51,7 +51,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   loopPracticeCue: true,
   playbackRate: 1,
   saveRawRecordings: false,
-  syncEnabled: false,
+  syncEnabled: true,
   siteAccessMode: "blacklist",
   siteBlacklist: [],
   siteWhitelist: ["youtube.com"],
@@ -88,7 +88,7 @@ export function createFreeEntitlement(userId: string, usageToday: Record<UsageFe
     quota: FREE_QUOTA,
     usageToday,
     quotaResetAt: tomorrow.toISOString(),
-    syncEnabled: false,
+    syncEnabled: true,
     updatedAt: new Date().toISOString()
   };
 }

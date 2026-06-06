@@ -83,6 +83,7 @@ type PageWordPayload = {
 };
 
 type PreviewTab = "page" | "mastered" | "sentences";
+type LibraryTab = "new" | "mastered" | "sentences";
 
 type PreviewWord = PageWord & {
   id?: string;
@@ -141,6 +142,7 @@ export function PopupApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [activeView, setActiveView] = useState<PopupView>("home");
   const [previewTab, setPreviewTab] = useState<PreviewTab>("page");
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("new");
   const [pageWords, setPageWords] = useState<PageWord[]>([]);
   const [wordActionBusy, setWordActionBusy] = useState("");
   const [libraryWordbookId, setLibraryWordbookId] = useState("");
@@ -330,7 +332,7 @@ export function PopupApp() {
     try {
       setStatus("正在打开字幕设置面板...");
       await wakeSafeContentScript("新版字幕面板已唤醒。");
-      const opened = await dispatchActiveYouTubeEvent("yll-open-settings");
+      const opened = await dispatchActiveYouTubeEvent("yll-open-settings", true);
       setStatus(opened ? "字幕设置面板已打开。" : "请先切换到 YouTube 视频播放页。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "字幕设置面板打开失败。");
@@ -440,7 +442,7 @@ export function PopupApp() {
     await chrome.runtime.openOptionsPage();
   };
 
-  const dispatchActiveYouTubeEvent = async (eventName: string) => {
+  const dispatchActiveYouTubeEvent = async (eventName: string, openSettings = false) => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url) return false;
 
@@ -449,11 +451,13 @@ export function PopupApp() {
 
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: (name: string) => {
+      func: (name: string, shouldOpenSettings: boolean) => {
+        const page = window as Window & { __yllSafeOpenSettingsPanel?: () => boolean };
+        if (shouldOpenSettings && page.__yllSafeOpenSettingsPanel?.()) return true;
         window.dispatchEvent(new Event(name));
-        return true;
+        return shouldOpenSettings ? Boolean(document.getElementById("yll-lab-settings-v2")) : true;
       },
-      args: [eventName]
+      args: [eventName, openSettings]
     });
     return Boolean(result?.result);
   };
@@ -757,6 +761,9 @@ export function PopupApp() {
   const selectedLibraryWordbookId = libraryWordbookId || wordbooks[0]?.id || "";
   const selectedLibraryWordbook = wordbooks.find((wordbook) => wordbook.id === selectedLibraryWordbookId);
   const libraryWords = vocabItems.filter((item) => !selectedLibraryWordbookId || item.wordbookId === selectedLibraryWordbookId);
+  const libraryNewWords = libraryWords.filter((item) => (item.mastery ?? 0) < 4);
+  const libraryMasteredWords = libraryWords.filter((item) => (item.mastery ?? 0) >= 4);
+  const visibleLibraryWords = libraryTab === "mastered" ? libraryMasteredWords : libraryNewWords;
   const currentSiteRules = settings?.siteAccessMode === "whitelist" ? settings.siteWhitelist : settings?.siteBlacklist ?? [];
   const accountBadge = !bootstrap ? "LOADING" : isSignedIn ? "SIGNED IN" : "LOCAL";
 
@@ -957,8 +964,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.140 待审核</strong>
-              <p>优化本页生词操作区，并增强官方字幕重试。</p>
+              <strong>0.1.141 待审核</strong>
+              <p>修复学习库筛选、字幕设置面板和官方字幕优先读取。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -1226,44 +1233,52 @@ export function PopupApp() {
                 <button type="button" onClick={exportCurrentWordbook}>导出当前词本</button>
               </div>
               <div className="library-summary">
-                <span>生词 {libraryWords.filter((item) => (item.mastery ?? 0) < 4).length}</span>
-                <span>已掌握 {libraryWords.filter((item) => (item.mastery ?? 0) >= 4).length}</span>
-                <span>收藏句 {sentenceCount}</span>
+                <button className={libraryTab === "new" ? "active" : ""} type="button" onClick={() => setLibraryTab("new")}>
+                  生词 {libraryNewWords.length}
+                </button>
+                <button className={libraryTab === "mastered" ? "active" : ""} type="button" onClick={() => setLibraryTab("mastered")}>
+                  已掌握 {libraryMasteredWords.length}
+                </button>
+                <button className={libraryTab === "sentences" ? "active" : ""} type="button" onClick={() => setLibraryTab("sentences")}>
+                  收藏句 {sentenceCount}
+                </button>
               </div>
-              <div className="popup-library-list">
-                {libraryWords.length ? libraryWords.map((item) => (
-                  <div className="popup-library-row" key={item.id ?? item.text}>
-                    <span>
-                      <strong>{item.text ?? "未命名单词"}</strong>
-                      <small>{item.meaning ?? item.sourceSentence ?? "释义待补充"}</small>
-                    </span>
-                    <em>{(item.mastery ?? 0) >= 4 ? "已掌握" : "生词"}</em>
-                    <button type="button" onClick={() => void deleteLibraryWord(item)} title="从当前词本删除">
-                      <Trash2 size={14} />
-                      删除
+              {libraryTab === "sentences" ? (
+                <div className="popup-sentence-list">
+                  {sentenceNotes.length ? sentenceNotes.map((item, index) => (
+                    <button key={`${item.text ?? "sentence"}-${index}`} type="button" onClick={openPractice}>
+                      <span>
+                        <em>{item.text ?? "未命名例句"}</em>
+                        <small>{item.translatedText ?? "译文待补充"}</small>
+                      </span>
+                      <ChevronRight size={15} />
                     </button>
-                  </div>
-                )) : (
-                  <div className="empty-preview">
-                    <CircleAlert size={18} />
-                    <span>当前词本还没有单词。</span>
-                  </div>
-                )}
-              </div>
-              <div className="popup-sentence-list">
-                <strong>收藏句</strong>
-                {sentenceNotes.length ? sentenceNotes.slice(0, 8).map((item, index) => (
-                  <button key={`${item.text ?? "sentence"}-${index}`} type="button" onClick={openPractice}>
-                    <span>
-                      <em>{item.text ?? "未命名例句"}</em>
-                      <small>{item.translatedText ?? "译文待补充"}</small>
-                    </span>
-                    <ChevronRight size={15} />
-                  </button>
-                )) : (
-                  <small>暂无收藏句。可在视频页点击“收藏当前句”。</small>
-                )}
-              </div>
+                  )) : (
+                    <small>暂无收藏句。可在视频页点击“收藏当前句”。</small>
+                  )}
+                </div>
+              ) : (
+                <div className="popup-library-list">
+                  {visibleLibraryWords.length ? visibleLibraryWords.map((item) => (
+                    <div className="popup-library-row" key={item.id ?? item.text}>
+                      <span>
+                        <strong>{item.text ?? "未命名单词"}</strong>
+                        <small>{item.meaning ?? item.sourceSentence ?? "释义待补充"}</small>
+                      </span>
+                      <em>{(item.mastery ?? 0) >= 4 ? "已掌握" : "生词"}</em>
+                      <button type="button" onClick={() => void deleteLibraryWord(item)} title="从当前词本删除">
+                        <Trash2 size={14} />
+                        删除
+                      </button>
+                    </div>
+                  )) : (
+                    <div className="empty-preview">
+                      <CircleAlert size={18} />
+                      <span>{libraryTab === "mastered" ? "当前词本还没有已掌握单词。" : "当前词本还没有生词。"}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <button className="detail-action" type="button" onClick={openPractice}>打开混合练习</button>
             </>
           )}

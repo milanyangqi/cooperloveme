@@ -310,7 +310,7 @@ export interface SecretSettings {
 }
 
 export interface ExtensionSettings {
-  schemaVersion: 1;
+  schemaVersion: number;
   enabled: boolean;
   sourceLanguage: string;
   targetLanguage: string;

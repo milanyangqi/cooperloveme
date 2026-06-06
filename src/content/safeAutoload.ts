@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.140";
+const SCRIPT_VERSION = "0.1.141";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -221,6 +221,7 @@ const runtime = window as typeof window & {
   __yllSafeSettings?: SafeSettings;
   __yllSafeScriptVersion?: string;
   __yllSafeStopCurrentScript?: () => void;
+  __yllSafeOpenSettingsPanel?: () => boolean;
   __yllSafeContextInvalidated?: boolean;
   __yllSafeIsLoadingOfficial?: boolean;
   __yllSafeCanUseVisibleFallback?: boolean;
@@ -320,11 +321,13 @@ function stopTimers() {
   runtime.__yllSafeOfficialRetryTimer = undefined;
   clearScheduledOfficialRetry();
   clearStartupOfficialRetries();
+  runtime.__yllSafeOpenSettingsPanel = undefined;
 }
 
 function announceScriptVersion() {
   runtime.__yllSafeScriptVersion = SCRIPT_VERSION;
   runtime.__yllSafeStopCurrentScript = stopCurrentScriptInstance;
+  runtime.__yllSafeOpenSettingsPanel = openSettingsPanel;
   try {
     window.dispatchEvent(new CustomEvent("yll-safe-version-active", { detail: { version: SCRIPT_VERSION } }));
   } catch {
@@ -2821,8 +2824,14 @@ function toggleSettingsPanel() {
     existing.remove();
     return;
   }
+  openSettingsPanel();
+}
+
+function openSettingsPanel() {
+  mountPanel();
   ensureSettingsPanel();
   renderSettingsPanel();
+  return Boolean(document.getElementById(SETTINGS_PANEL_ID));
 }
 
 function renderSettingsPanel() {
@@ -4908,16 +4917,6 @@ async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: b
     runtime.__yllSafeLastFailure = `textTracks early: ${toErrorMessage(error)}`;
   }
 
-  try {
-    const directRows = await loadDirectTimedTextRows(videoId);
-    if (directRows.length) {
-      addDebugLog("official:direct-timedtext-early-success", { rows: directRows.length });
-      return directRows;
-    }
-  } catch (error) {
-    runtime.__yllSafeLastFailure = `timedtext early: ${toErrorMessage(error)}`;
-  }
-
   const [snapshot, fetchedPlayerResponse] = await Promise.all([
     readPlayerSnapshotViaBackground(),
     withTimeout(fetchPlayerResponseFromPage(), 1600, "watch html player response").catch((error) => {
@@ -4956,6 +4955,16 @@ async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: b
     return await loadRowsFromTracks(videoId, tracks, "official");
   } catch (error) {
     runtime.__yllSafeLastFailure = `official: ${toErrorMessage(error)}`;
+  }
+
+  try {
+    const directRows = await loadDirectTimedTextRows(videoId);
+    if (directRows.length) {
+      addDebugLog("official:direct-timedtext-success", { rows: directRows.length });
+      return directRows;
+    }
+  } catch (error) {
+    runtime.__yllSafeLastFailure = `${runtime.__yllSafeLastFailure ?? "official failed"}; timedtext: ${toErrorMessage(error)}`;
   }
 
   try {
@@ -5570,8 +5579,7 @@ window.addEventListener("yll-save-current-sentence", () => {
   });
 });
 window.addEventListener("yll-open-settings", () => {
-  mountPanel();
-  toggleSettingsPanel();
+  openSettingsPanel();
 });
 window.addEventListener("yll-open-library", () => {
   void requireSignedInFeature("学习库").then((allowed) => {

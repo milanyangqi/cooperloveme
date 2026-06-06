@@ -13,7 +13,7 @@ function storageGet<T>(area: chrome.storage.StorageArea, key: string): Promise<T
 
 export async function loadSettings(): Promise<ExtensionSettings> {
   const stored = await storageGet<Partial<ExtensionSettings>>(chrome.storage.sync, SYNC_SETTINGS_KEY);
-  return {
+  const settings = {
     ...DEFAULT_SETTINGS,
     ...stored,
     ai: {
@@ -21,6 +21,11 @@ export async function loadSettings(): Promise<ExtensionSettings> {
       ...(stored?.ai ?? {})
     }
   };
+  if ((stored?.schemaVersion ?? 0) < 2) {
+    settings.syncEnabled = true;
+    settings.schemaVersion = DEFAULT_SETTINGS.schemaVersion;
+  }
+  return settings;
 }
 
 export async function saveSettings(patch: Partial<ExtensionSettings>): Promise<ExtensionSettings> {

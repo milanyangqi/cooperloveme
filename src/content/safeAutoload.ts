@@ -125,7 +125,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.115";
+const SCRIPT_VERSION = "0.1.118";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -139,6 +139,8 @@ const MIN_TIMED_WORD_COVERAGE_RATIO = 0.82;
 const MIN_TIMED_WORD_SPAN_RATIO = 0.45;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
+const TRANSLATION_RETRY_LIMIT = 3;
+const TRANSLATION_RETRY_BACKOFF_MS = 15000;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 6000;
 const OFFICIAL_AUTO_ATTEMPTS = 2;
@@ -197,6 +199,8 @@ const runtime = window as typeof window & {
   __yllSafeTranslationRetryGeneration?: number;
   __yllSafeTranslationRetryCount?: number;
   __yllSafeLastTranslationRetryAt?: number;
+  __yllSafeLastTranslationFailure?: string;
+  __yllSafeLastTranslationSummary?: string;
   __yllSafeSettings?: SafeSettings;
   __yllSafeScriptVersion?: string;
   __yllSafeStopCurrentScript?: () => void;
@@ -1513,6 +1517,7 @@ function addDebugLog(event: string, details?: unknown) {
 
 function debugSnapshot() {
   const rows = runtime.__yllSafeRows ?? [];
+  const translatedRows = rows.filter((cue) => cue.translatedText).length;
   return {
     version: SCRIPT_VERSION,
     videoId: getVideoId(),
@@ -1521,6 +1526,11 @@ function debugSnapshot() {
     sources: Array.from(new Set(rows.map((cue) => cue.source))),
     loadingVideoId: runtime.__yllSafeLoadingVideoId,
     loadedVideoId: runtime.__yllSafeLoadedVideoId,
+    isTranslating: Boolean(runtime.__yllSafeIsTranslating),
+    translatedRows,
+    translationRetryCount: runtime.__yllSafeTranslationRetryCount,
+    lastTranslationFailure: runtime.__yllSafeLastTranslationFailure,
+    lastTranslationSummary: runtime.__yllSafeLastTranslationSummary,
     isLoadingOfficial: runtime.__yllSafeIsLoadingOfficial,
     canUseFallback: runtime.__yllSafeCanUseVisibleFallback,
     attempts: runtime.__yllSafeOfficialAttemptCount,
@@ -3247,6 +3257,8 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
   try {
     setCaptionStatus(`已加载 ${rows.length} 条字幕；正在生成中文译文...`, sourceLabel);
     const translatedByKey = new Map<string, { translatedText?: string; provider?: string }>();
+    let failedBatches = 0;
+    let completedBatches = 0;
     for (let index = 0; index < translatable.length; index += TRANSLATION_BATCH_SIZE) {
       if (runtime.__yllSafeTranslationToken !== token || getVideoId() !== videoId) return;
       const batch = translatable.slice(index, index + TRANSLATION_BATCH_SIZE);
@@ -3261,17 +3273,27 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
           });
           return;
         }
+        completedBatches += 1;
         translated.forEach((item, itemIndex) => {
           const sourceCue = batch[itemIndex];
           if (!sourceCue) return;
+          const provider = item.provider === "ai" || item.provider === "youtube" || item.provider === "web" ? item.provider : "none";
+          if (!item.translatedText || provider === "none") return;
           translatedByKey.set(translationKey(sourceCue), {
             translatedText: item.translatedText,
-            provider: item.provider
+            provider
           });
         });
       } catch (error) {
-        setCaptionStatus(`已加载 ${rows.length} 条字幕；免费翻译暂时不可用：${toErrorMessage(error)}`, sourceLabel);
-        break;
+        failedBatches += 1;
+        runtime.__yllSafeLastTranslationFailure = toErrorMessage(error);
+        addDebugLog("translation:batch-error", {
+          sourceLabel,
+          batchStart: index,
+          batchSize: batch.length,
+          error: runtime.__yllSafeLastTranslationFailure
+        });
+        continue;
       }
 
       runtime.__yllSafeRows = (runtime.__yllSafeRows ?? []).map((row) => {
@@ -3285,26 +3307,27 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
       });
       renderRows(runtime.__yllSafeRows);
       updateActiveCue();
-      setCaptionStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕；译文同步中 ${Math.min(index + TRANSLATION_BATCH_SIZE, translatable.length)}/${translatable.length}`, sourceLabel);
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     if (runtime.__yllSafeTranslationToken === token && getVideoId() === videoId) {
       const translatedRows = runtime.__yllSafeRows?.filter((cue) => cue.translatedText).length ?? 0;
+      const totalRows = runtime.__yllSafeRows?.length ?? rows.length;
+      runtime.__yllSafeLastTranslationSummary = `${translatedRows}/${totalRows}`;
       addDebugLog("translation:complete", {
         sourceLabel,
-        rows: runtime.__yllSafeRows?.length ?? rows.length,
-        translatedRows
+        rows: totalRows,
+        translatedRows,
+        completedBatches,
+        failedBatches
       });
-      if (translatedRows > 0) {
-        setCaptionStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕；中文译文已生成。`, sourceLabel);
+      if (translatedRows >= totalRows) {
+        runtime.__yllSafeLastTranslationFailure = undefined;
+        setCaptionStatus(`已加载 ${totalRows} 条字幕；中文译文已生成。`, sourceLabel);
+      } else if (translatedRows > 0) {
+        setCaptionStatus(`已加载 ${totalRows} 条字幕；中文译文已生成 ${translatedRows}/${totalRows}，后台会继续补译。`, sourceLabel);
       } else {
         runtime.__yllSafeTranslatedVideoId = undefined;
-        setCaptionStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕；中文译文暂未生成，稍后会重试。`, sourceLabel);
-        window.setTimeout(() => {
-          if (getVideoId() === videoId && !(runtime.__yllSafeRows ?? []).some((cue) => cue.translatedText)) {
-            void translateRowsForCurrentVideo(sourceLabel);
-          }
-        }, 1800);
+        setCaptionStatus(`已加载 ${totalRows} 条字幕；中文译文暂未生成，后台会退避重试。`, sourceLabel);
       }
     }
   } catch (error) {
@@ -3332,8 +3355,8 @@ function maybeRetryMissingTranslations() {
 
   const now = Date.now();
   const retryCount = runtime.__yllSafeTranslationRetryCount ?? 0;
-  if (retryCount >= 3) return;
-  if (runtime.__yllSafeLastTranslationRetryAt && now - runtime.__yllSafeLastTranslationRetryAt < 7000) return;
+  if (retryCount >= TRANSLATION_RETRY_LIMIT) return;
+  if (runtime.__yllSafeLastTranslationRetryAt && now - runtime.__yllSafeLastTranslationRetryAt < TRANSLATION_RETRY_BACKOFF_MS) return;
 
   runtime.__yllSafeTranslationRetryCount = retryCount + 1;
   runtime.__yllSafeLastTranslationRetryAt = now;
@@ -4500,6 +4523,8 @@ function tick() {
       runtime.__yllSafeTranslationRetryGeneration = undefined;
       runtime.__yllSafeTranslationRetryCount = undefined;
       runtime.__yllSafeLastTranslationRetryAt = undefined;
+      runtime.__yllSafeLastTranslationFailure = undefined;
+      runtime.__yllSafeLastTranslationSummary = undefined;
       runtime.__yllSafeLastOfficialAttemptAt = undefined;
       runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
@@ -4534,6 +4559,8 @@ function tick() {
       runtime.__yllSafeTranslationRetryGeneration = undefined;
       runtime.__yllSafeTranslationRetryCount = undefined;
       runtime.__yllSafeLastTranslationRetryAt = undefined;
+      runtime.__yllSafeLastTranslationFailure = undefined;
+      runtime.__yllSafeLastTranslationSummary = undefined;
       runtime.__yllSafeLastOfficialAttemptAt = undefined;
       runtime.__yllSafeLastOfficialFailureAt = undefined;
       runtime.__yllSafeOfficialAttemptCount = undefined;
@@ -4621,6 +4648,8 @@ window.addEventListener("yll-safe-reload", () => {
   runtime.__yllSafeTranslationRetryGeneration = undefined;
   runtime.__yllSafeTranslationRetryCount = undefined;
   runtime.__yllSafeLastTranslationRetryAt = undefined;
+  runtime.__yllSafeLastTranslationFailure = undefined;
+  runtime.__yllSafeLastTranslationSummary = undefined;
   runtime.__yllSafeLastOfficialAttemptAt = undefined;
   runtime.__yllSafeOfficialAttemptCount = undefined;
   runtime.__yllSafeLastOfficialDebug = undefined;

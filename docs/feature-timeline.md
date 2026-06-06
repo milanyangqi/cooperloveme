@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 13:51:00 CST
+Last updated: 2026-06-06 17:25:23 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -25,7 +25,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-04 12:57 CST | `0.1.93` renders rows in chronological order and scrolls the active row into the lower part of the taller panel so playback moves upward | Needs extension reload and Chrome review on long videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
 | Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
-| Free translation fallback | In Review | 2026-06-04 20:28 CST | `0.1.103` limits free web translation concurrency and retries once after transient failures | Needs reload and Chrome review on an official-caption video. |
+| Free translation fallback | In Review | 2026-06-06 14:32 CST | `0.1.117` stabilizes missing-translation status, logs batch failures, and uses slower retry backoff instead of a fast 1.8s loop | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | In Review | 2026-06-06 13:51 CST | `0.1.115` enables hover/click lookup on video overlay words and reuses cached or pending free-translation lookups | Needs Chrome hover review. |
 | Subtitle settings panel | In Review | 2026-06-04 23:29 CST | `0.1.107` adds an internal close button and slightly narrows the floating settings panel | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-04 20:46 CST | `0.1.105` makes the practice entry choose the current playback cue when no active row is set | Needs manual Chrome review; full Trancy-style layout still planned. |
@@ -38,6 +38,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Export / Anki / CSV | In Review | 2026-06-03 13:05 CST | `0.1.81` adds JSON, CSV, and Anki CSV exports inside the local library panel | Needs Chrome download review; advanced Pro export can be expanded later. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
+| Popup account login entry | In Review | 2026-06-06 17:25 CST | `0.1.118` keeps a stable account-loading state before `GET_BOOTSTRAP` returns and adds a Relingo-style popup settings tab | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
 | Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
 | Stale content-script protection | In Review | 2026-06-06 13:45 CST | `0.1.115` injects on all `www.youtube.com/*` pages and lets the script self-activate on watch routes, covering YouTube SPA navigation | Needs extension reload and fresh YouTube page review. |
@@ -203,6 +204,27 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - the script still no-ops outside watch pages, but it can now survive YouTube homepage/search to watch-page SPA navigation and auto-mount without popup wake
   - word hover lookup now reuses pending per-word translation requests, avoiding repeated calls while the overlay refreshes under the mouse
   - pending extension reload and fresh YouTube route-change review
+
+- Local `0.1.116` popup account entry recovery:
+  - extension icon popup now loads `GET_BOOTSTRAP` and displays account state
+  - anonymous users see email/password login and registration controls directly in the popup
+  - signed-in users see account, plan, settings, and sign-out controls
+  - pending extension reload and popup review
+
+- Local `0.1.117` translation stability and account dashboard recovery:
+  - translation status no longer updates on every batch, reducing the constantly changing status line
+  - zero-translation results no longer trigger a 1.8s immediate retry loop; retries now use a slower capped backoff
+  - diagnostic snapshot now records translation retry count, translated row count, last translation failure, and last summary
+  - popup signed-in state now uses a compact account dashboard with vocab, saved sentence, practice, and mastered tiles inspired by Relingo
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - Chrome page inspection still showed stale `0.1.116` content script, so runtime review must wait for extension reload or fresh YouTube tab
+
+- Local `0.1.118` popup account/settings stabilization:
+  - popup no longer renders the anonymous login form while `GET_BOOTSTRAP` is pending, avoiding the brief false logged-out state for previously signed-in users
+  - added a bottom `我的` / `设置` popup switcher inspired by Relingo's extension panel
+  - the new popup settings view exposes enable plugin, wordbook, source/target language, bilingual subtitles, native CC hiding, practice behavior, playback rate, and AI toggle controls through the existing `UPDATE_SETTINGS` path
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - runtime review still needs Chrome extension reload and a fresh YouTube watch tab because current Chrome is not exposed through a remote debugging control port
 
 ### 2026-06-03
 

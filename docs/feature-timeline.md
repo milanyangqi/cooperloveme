@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 21:48:20 CST
+Last updated: 2026-06-06 21:59:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -34,7 +34,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
 | Comprehension quiz mode | In Review | 2026-06-03 13:05 CST | `0.1.81` saves quiz attempts to the local practice history after an option is selected | Needs generated questions and richer feedback. |
 | Sentence save / collection | In Review | 2026-06-04 17:49 CST | `0.1.94` restores per-row practice and save actions in the right-side caption list | Needs extension reload and Chrome review. |
-| Vocabulary library | In Review | 2026-06-06 21:38 CST | `0.1.130` makes `本页生词` come from the current subtitle page's deduped words and gates practice/library entries behind signed-in auth | Needs extension reload and Chrome review. |
+| Vocabulary library | In Review | 2026-06-06 21:59 CST | `0.1.132` makes popup `本页生词` read all deduped words from the current YouTube subtitle rows, adds scroll for long word lists, and lets `生词` add to the wordbook while `掌握` moves the word to the page mastered tab | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
@@ -318,6 +318,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - moved complete `video.textTracks` and direct `/api/timedtext` attempts ahead of slower caption-track/transcript paths
   - expanded direct timedtext language candidates and logs failed direct attempts for easier diagnosis
   - background caption fetch now returns content type so the content script can distinguish empty/HTML responses from usable caption bodies
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.132` popup current-page vocabulary:
+  - popup `本页生词` now reads all deduped words from the active YouTube page's current subtitle rows instead of showing only saved vocabulary
+  - page words merge with local saved/mastery state so `掌握` persists mastery `5` and moves the word to `已掌握`, while `生词` upserts the word into the default wordbook with mastery `0`
+  - the popup vocabulary preview has an internal scroll area for long videos with hundreds of words, keeping the outer popup height stable
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

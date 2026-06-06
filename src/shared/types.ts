@@ -380,6 +380,7 @@ export interface RuntimeRequestMap {
   };
   EXPORT_DATA: undefined;
   CLEAR_LOCAL_DATA: undefined;
+  READ_ACTIVE_PAGE_WORDS: undefined;
   READ_PAGE_PLAYER_RESPONSE: undefined;
   FETCH_CAPTION_TEXT: { url: string };
   FETCH_CAPTION_TEXT_MAIN: { url: string };

@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { sendRuntimeMessage } from "../shared/messages";
-import type { EntitlementSnapshot, ExportBundle, ExtensionSettings, RemoteAuthSnapshot, UserProfile } from "../shared/types";
+import type { EntitlementSnapshot, ExportBundle, ExtensionSettings, RemoteAuthSnapshot, UserProfile, VocabItem } from "../shared/types";
 
 type InjectResult = {
   href: string;
@@ -48,14 +48,39 @@ type PopupBootstrap = {
 type PopupView = "home" | "settings" | "account";
 
 type VocabPreview = {
+  id?: string;
   text?: string;
+  normalizedText?: string;
   meaning?: string;
   mastery?: number;
+  sourceSentence?: string;
+  translatedSentence?: string;
 };
 
 type SentencePreview = {
   text?: string;
   translatedText?: string;
+};
+
+type PageWord = {
+  text: string;
+  sourceSentence?: string;
+  translatedSentence?: string;
+};
+
+type PageWordPayload = {
+  version?: string;
+  videoId?: string;
+  words: PageWord[];
+};
+
+type PreviewTab = "page" | "mastered" | "sentences";
+
+type PreviewWord = PageWord & {
+  id?: string;
+  meaning?: string;
+  mastery: number;
+  saved: boolean;
 };
 
 type PlaybackRateApplyResult = {
@@ -107,6 +132,9 @@ export function PopupApp() {
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [activeView, setActiveView] = useState<PopupView>("home");
+  const [previewTab, setPreviewTab] = useState<PreviewTab>("page");
+  const [pageWords, setPageWords] = useState<PageWord[]>([]);
+  const [wordActionBusy, setWordActionBusy] = useState("");
 
   const syncPopupHeightWithCaptionPanel = async () => {
     if (isDocked) {
@@ -143,13 +171,18 @@ export function PopupApp() {
   };
 
   const reloadBootstrap = async () => {
-    const response = await sendRuntimeMessage<PopupBootstrap>({ type: "GET_BOOTSTRAP" });
+    const [response, wordsResponse] = await Promise.all([
+      sendRuntimeMessage<PopupBootstrap>({ type: "GET_BOOTSTRAP" }),
+      sendRuntimeMessage<PageWordPayload>({ type: "READ_ACTIVE_PAGE_WORDS" })
+    ]);
     if (response.ok) {
       setBootstrap(response.data);
       setSettingsDraft(response.data.settings);
-      return;
     }
-    setStatus(response.error);
+    if (wordsResponse.ok) {
+      setPageWords(wordsResponse.data.words);
+    }
+    if (!response.ok) setStatus(response.error);
   };
 
   useEffect(() => {
@@ -439,6 +472,41 @@ export function PopupApp() {
     setStatus("本地学习数据已导出。");
   };
 
+  const refreshPageWords = async () => {
+    const response = await sendRuntimeMessage<PageWordPayload>({ type: "READ_ACTIVE_PAGE_WORDS" });
+    if (!response.ok) return;
+    setPageWords(response.data.words);
+  };
+
+  const savePreviewWord = async (word: PreviewWord, mastery: VocabItem["mastery"], message: string) => {
+    const key = `${word.text}:${mastery}`;
+    try {
+      setWordActionBusy(key);
+      const response = word.id
+        ? await sendRuntimeMessage<VocabPreview>({ type: "UPDATE_VOCAB_MASTERY", payload: { id: word.id, mastery } })
+        : await sendRuntimeMessage<VocabPreview>({
+            type: "UPSERT_VOCAB_MASTERY",
+            payload: {
+              text: word.text,
+              language: "en",
+              meaning: word.meaning,
+              sourceSentence: word.sourceSentence,
+              translatedSentence: word.translatedSentence,
+              mastery
+            }
+          });
+      if (!response.ok) {
+        setStatus(response.error);
+        return;
+      }
+      setStatus(message);
+      await reloadBootstrap();
+      await refreshPageWords();
+    } finally {
+      setWordActionBusy("");
+    }
+  };
+
   const updateSettings = async (patch: Partial<ExtensionSettings>) => {
     if (!settingsDraft) return;
 
@@ -472,8 +540,22 @@ export function PopupApp() {
   const vocabItems = (bootstrap?.library.vocabItems as VocabPreview[] | undefined) ?? [];
   const sentenceNotes = (bootstrap?.library.sentenceNotes as SentencePreview[] | undefined) ?? [];
   const masteredCount = vocabItems.filter((item) => item.mastery && item.mastery >= 4).length;
-  const recentVocab = vocabItems.slice(0, 9);
   const recentSentences = sentenceNotes.slice(0, 4);
+  const savedByKey = new Map(vocabItems.map((item) => [normalizePreviewWord(item.normalizedText ?? item.text ?? ""), item]));
+  const currentPageWords: PreviewWord[] = pageWords
+    .map((word) => {
+      const saved = savedByKey.get(normalizePreviewWord(word.text));
+      return {
+        ...word,
+        id: saved?.id,
+        meaning: saved?.meaning,
+        mastery: saved?.mastery ?? 0,
+        saved: Boolean(saved)
+      };
+    })
+    .filter((word) => normalizePreviewWord(word.text));
+  const pageNewWords = currentPageWords.filter((word) => word.mastery < 4);
+  const pageMasteredWords = currentPageWords.filter((word) => word.mastery >= 4);
   const accountBadge = !bootstrap ? "LOADING" : isSignedIn ? "SIGNED IN" : "LOCAL";
   const settings = settingsDraft;
 
@@ -530,34 +612,66 @@ export function PopupApp() {
 
               <section className="library-preview">
                 <div className="preview-tabs">
-                  <button className="active" type="button">本页生词</button>
-                  <button type="button">已掌握({masteredCount})</button>
-                  <button type="button">收藏句({sentenceCount})</button>
+                  <button className={previewTab === "page" ? "active" : ""} type="button" onClick={() => setPreviewTab("page")}>
+                    本页生词({pageNewWords.length})
+                  </button>
+                  <button className={previewTab === "mastered" ? "active" : ""} type="button" onClick={() => setPreviewTab("mastered")}>
+                    已掌握({pageMasteredWords.length})
+                  </button>
+                  <button className={previewTab === "sentences" ? "active" : ""} type="button" onClick={() => setPreviewTab("sentences")}>
+                    收藏句({sentenceCount})
+                  </button>
                 </div>
-                {recentVocab.length ? (
+                {previewTab === "page" && pageNewWords.length ? (
                   <div className="word-list">
-                    {recentVocab.map((item, index) => (
-                      <button key={`${item.text ?? "word"}-${index}`} type="button" onClick={openLearningLibrary}>
+                    {pageNewWords.map((item) => (
+                      <PreviewWordRow
+                        key={item.text}
+                        item={item}
+                        busyKey={wordActionBusy}
+                        saveLabel={item.saved ? "已收" : "生词"}
+                        onSave={() => void savePreviewWord(item, 0, item.saved ? "已在生词库中。" : "已添加到生词库。")}
+                        onMaster={() => void savePreviewWord(item, 5, "已移动到已掌握。")}
+                        onOpen={openLearningLibrary}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {previewTab === "mastered" && pageMasteredWords.length ? (
+                  <div className="word-list">
+                    {pageMasteredWords.map((item) => (
+                      <PreviewWordRow
+                        key={item.text}
+                        item={item}
+                        busyKey={wordActionBusy}
+                        saveLabel="生词"
+                        onSave={() => void savePreviewWord(item, 0, "已移回本页生词。")}
+                        onMaster={() => void savePreviewWord(item, 5, "已在已掌握列表中。")}
+                        onOpen={openLearningLibrary}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {previewTab === "sentences" && recentSentences.length ? (
+                  <div className="word-list">
+                    {recentSentences.map((item, index) => (
+                      <button key={`${item.text ?? "sentence"}-${index}`} type="button" onClick={openLearningLibrary}>
                         <span>
-                          <strong>{item.text ?? "未命名单词"}</strong>
-                          <small>{item.meaning ?? "释义待补充"}</small>
+                          <strong>{item.text ?? "未命名例句"}</strong>
+                          <small>{item.translatedText ?? "译文待补充"}</small>
                         </span>
-                        <Heart size={15} />
                         <ChevronRight size={15} />
                       </button>
                     ))}
                   </div>
-                ) : (
+                ) : null}
+                {((previewTab === "page" && !pageNewWords.length) ||
+                  (previewTab === "mastered" && !pageMasteredWords.length) ||
+                  (previewTab === "sentences" && !recentSentences.length)) ? (
                   <div className="empty-preview">
                     <CircleAlert size={18} />
-                    <span>当前还没有收藏生词。</span>
+                    <span>{previewEmptyText(previewTab, pageWords.length)}</span>
                   </div>
-                )}
-                {recentSentences.length ? (
-                  <button className="sentence-preview-link" type="button" onClick={openLearningLibrary}>
-                    查看 {recentSentences.length} 条最近收藏句
-                    <ChevronRight size={15} />
-                  </button>
                 ) : null}
               </section>
             </>
@@ -630,8 +744,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.131 待审核</strong>
-              <p>修复过期上下文报错，并提前尝试 timedtext 官方字幕。</p>
+              <strong>0.1.132 待审核</strong>
+              <p>本页生词读取当前视频全部去重单词，并支持生词库/已掌握切换。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -838,6 +952,56 @@ function FeatureCard({ icon, label, value, onClick }: { icon: ReactNode; label: 
       <em>{value}</em>
     </button>
   );
+}
+
+function PreviewWordRow({
+  item,
+  busyKey,
+  saveLabel,
+  onSave,
+  onMaster,
+  onOpen
+}: {
+  item: PreviewWord;
+  busyKey: string;
+  saveLabel: string;
+  onSave: () => void;
+  onMaster: () => void;
+  onOpen: () => void;
+}) {
+  const saveBusy = busyKey === `${item.text}:0`;
+  const masterBusy = busyKey === `${item.text}:5`;
+  return (
+    <div className="word-row">
+      <button className="word-row-main" type="button" onClick={onOpen}>
+        <span>
+          <strong>{item.text}</strong>
+          <small>{item.meaning ?? item.sourceSentence ?? "释义待补充"}</small>
+        </span>
+        <ChevronRight size={15} />
+      </button>
+      <div className="word-row-actions">
+        <button type="button" onClick={onSave} disabled={saveBusy || masterBusy} title={saveLabel === "生词" ? "加入本页生词/生词库" : "已在生词库"}>
+          <Heart size={14} />
+          <span>{saveLabel}</span>
+        </button>
+        <button type="button" onClick={onMaster} disabled={saveBusy || masterBusy} title="标记为已掌握">
+          <CheckCircle2 size={14} />
+          <span>掌握</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function normalizePreviewWord(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function previewEmptyText(tab: PreviewTab, totalPageWords: number): string {
+  if (tab === "page") return totalPageWords ? "本页单词都已掌握。" : "当前页还没有读取到字幕单词，请先点击重读字幕。";
+  if (tab === "mastered") return "本页还没有已掌握单词。";
+  return "当前还没有收藏句。";
 }
 
 function mergeSettings(settings: ExtensionSettings, patch: Partial<ExtensionSettings>): ExtensionSettings {

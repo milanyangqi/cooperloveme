@@ -117,6 +117,9 @@ async function ensureCurrentContentScript(tabId: number): Promise<void> {
 
 async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
   switch (message.type) {
+    case "READ_ACTIVE_PAGE_WORDS":
+      return readActivePageWords();
+
     case "READ_PAGE_PLAYER_RESPONSE":
       if (!sender.tab?.id) {
         throw new Error("只能从 YouTube 视频页面读取播放器字幕信息。");
@@ -751,6 +754,68 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
   });
 
   return injection?.result ?? {};
+}
+
+async function readActivePageWords(): Promise<{
+  version?: string;
+  videoId?: string;
+  words: Array<{ text: string; sourceSentence?: string; translatedSentence?: string }>;
+}> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url) return { words: [] };
+
+  const parsed = new URL(tab.url);
+  if (!parsed.hostname.includes("youtube.com") || parsed.pathname !== "/watch") return { words: [] };
+
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      type SafeRow = {
+        text?: string;
+        translatedText?: string;
+        start?: number;
+      };
+      const page = window as Window & {
+        __yllSafeScriptVersion?: string;
+        __yllSafeRows?: SafeRow[];
+        __yllSafeLoadedVideoId?: string;
+      };
+      const cleanToken = (token: string) =>
+        token
+          .toLowerCase()
+          .replace(/^[^a-z]+|[^a-z]+$/g, "")
+          .replace(/'{2,}/g, "'");
+      const rows = Array.isArray(page.__yllSafeRows) ? page.__yllSafeRows : [];
+      const words = new Map<string, { text: string; sourceSentence?: string; translatedSentence?: string; firstStart: number }>();
+
+      rows.forEach((row) => {
+        const sourceSentence = typeof row.text === "string" ? row.text.trim() : "";
+        if (!sourceSentence) return;
+        sourceSentence.match(/[A-Za-z][A-Za-z'-]*/g)?.forEach((rawToken) => {
+          const text = cleanToken(rawToken);
+          if (text.length < 2 || /^\d+$/.test(text)) return;
+          if (!words.has(text)) {
+            words.set(text, {
+              text,
+              sourceSentence,
+              translatedSentence: typeof row.translatedText === "string" ? row.translatedText.trim() : undefined,
+              firstStart: Number.isFinite(row.start) ? Number(row.start) : Number.MAX_SAFE_INTEGER
+            });
+          }
+        });
+      });
+
+      return {
+        version: page.__yllSafeScriptVersion,
+        videoId: page.__yllSafeLoadedVideoId,
+        words: Array.from(words.values())
+          .sort((a, b) => a.firstStart - b.firstStart || a.text.localeCompare(b.text))
+          .map(({ firstStart: _firstStart, ...word }) => word)
+      };
+    }
+  });
+
+  return injection?.result ?? { words: [] };
 }
 
 async function loadLibrary(userId: string) {

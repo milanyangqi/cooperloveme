@@ -439,6 +439,10 @@ html.yll-dock-popup .popup {
 .library-preview {
   margin-top: 12px;
   padding: 12px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: 320px;
+  min-height: 158px;
 }
 
 .preview-tabs {
@@ -466,9 +470,15 @@ html.yll-dock-popup .popup {
 
 .word-list {
   display: grid;
+  align-content: start;
+  max-height: 236px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
 }
 
-.word-list button,
+.word-list > button,
+.word-row,
 .sentence-preview-link {
   min-height: 38px;
   border: 0;
@@ -481,6 +491,55 @@ html.yll-dock-popup .popup {
   gap: 10px;
   text-align: left;
   cursor: pointer;
+}
+
+.word-row {
+  min-height: 58px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.word-row-main {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #f7f8f8;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.word-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.word-row-actions button {
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: #24282c;
+  color: #f7f8f8;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.word-row-actions button:first-child {
+  color: #ffc857;
+}
+
+.word-row-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .word-list strong,

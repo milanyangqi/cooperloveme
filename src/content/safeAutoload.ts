@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.138";
+const SCRIPT_VERSION = "0.1.139";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -1020,10 +1020,10 @@ function installStyle() {
       z-index: 2147483647;
       right: 394px;
       top: 76px;
-      width: 286px;
+      width: 390px;
       max-width: calc(100vw - 430px);
       max-height: calc(100dvh - 112px);
-      padding: 14px;
+      padding: 0 20px 20px;
       color: #f7f8f8;
       background: #25282c;
       border: 1px solid rgba(255,255,255,.16);
@@ -1033,50 +1033,110 @@ function installStyle() {
       overflow-y: auto;
     }
     #${SETTINGS_PANEL_ID} .yll-settings-head {
-      display: flex;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 30px 1fr 30px;
       align-items: center;
-      justify-content: space-between;
       gap: 8px;
-      margin-bottom: 10px;
+      min-height: 54px;
+      margin: 0 -20px 14px;
+      padding: 0 16px;
+      background: #25282c;
+      border-bottom: 1px solid rgba(255,255,255,.08);
     }
-    #${SETTINGS_PANEL_ID} h3 { margin: 0; font-size: 15px; }
+    #${SETTINGS_PANEL_ID} h3 { margin: 0; font-size: 17px; }
     #${SETTINGS_PANEL_ID} .yll-settings-close {
-      min-height: 26px;
-      padding: 0 9px;
-      color: #f7f8f8;
-      background: #2d3034;
-      border: 1px solid rgba(255,255,255,.16);
-      border-radius: 6px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      color: #a3aab5;
+      background: rgba(255,255,255,.07);
+      border: 0;
+      border-radius: 50%;
       font-size: 12px;
       font-weight: 750;
       cursor: pointer;
     }
+    #${SETTINGS_PANEL_ID} .yll-settings-back { transform: rotate(180deg); }
     #${SETTINGS_PANEL_ID} h4 {
-      margin: 14px 0 6px;
-      padding-top: 12px;
+      margin: 22px 0 8px;
+      padding: 0 0 0 10px;
       border-top: 1px solid rgba(255,255,255,.12);
-      color: #ffc857;
+      border-top: 0;
+      border-left: 4px solid #ff8a1f;
+      color: #f7f8f8;
       font-size: 13px;
     }
     #${SETTINGS_PANEL_ID} label {
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
-      gap: 10px;
-      padding: 9px 0;
-      border-top: 1px solid rgba(255,255,255,.09);
+      gap: 12px;
+      min-height: 42px;
+      padding: 7px 0;
+      border-top: 0;
     }
-    #${SETTINGS_PANEL_ID} input[type="range"] { width: 120px; }
+    #${SETTINGS_PANEL_ID} label small {
+      display: block;
+      margin-top: 4px;
+      color: #8d949d;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    #${SETTINGS_PANEL_ID} .yll-settings-group {
+      border-bottom: 1px solid rgba(255,255,255,.12);
+      padding-bottom: 14px;
+    }
+    #${SETTINGS_PANEL_ID} input[type="range"] { width: 130px; }
+    #${SETTINGS_PANEL_ID} input[type="checkbox"] {
+      appearance: none;
+      width: 38px;
+      height: 22px;
+      border-radius: 999px;
+      background: #3a3e43;
+      position: relative;
+      cursor: pointer;
+    }
+    #${SETTINGS_PANEL_ID} input[type="checkbox"]::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #f7f8f8;
+      transition: transform .16s ease;
+    }
+    #${SETTINGS_PANEL_ID} input[type="checkbox"]:checked { background: #ff8a1f; }
+    #${SETTINGS_PANEL_ID} input[type="checkbox"]:checked::after { transform: translateX(16px); }
     #${SETTINGS_PANEL_ID} select {
       min-width: 112px;
       height: 28px;
       color: #f7f8f8;
-      background: #2d3034;
-      border: 1px solid rgba(255,255,255,.16);
+      background: transparent;
+      border: 0;
       border-radius: 6px;
       padding: 0 6px;
+      font-weight: 740;
+      text-align: right;
     }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
+    #${SETTINGS_PANEL_ID} .yll-preview-box {
+      min-height: 190px;
+      border-radius: 8px;
+      background: #050505;
+      display: grid;
+      place-items: center;
+      margin-top: 10px;
+      color: #f7f8f8;
+      text-align: center;
+      font-size: 28px;
+      line-height: 1.35;
+    }
+    #${SETTINGS_PANEL_ID} .yll-preview-box span { color: #ff006e; background: rgba(255,255,255,.08); padding: 0 4px; }
     #${LIBRARY_PANEL_ID} {
       flex: 1 1 auto;
       min-height: 0;
@@ -2776,75 +2836,97 @@ function renderSettingsPanel() {
 function settingsPanelHtml(settings: SafeSettings) {
   return `
     <div class="yll-settings-head">
+      <button class="yll-settings-close yll-settings-back" type="button" data-settings-close>›</button>
       <h3>视频字幕</h3>
-      <button class="yll-settings-close" type="button" data-settings-close>关闭</button>
+      <button class="yll-settings-close" type="button" data-settings-close>×</button>
     </div>
-    <h4>字幕功能</h4>
-    <label>
-      <span>隐藏 YouTube 原生字幕</span>
-      <input type="checkbox" data-setting="hideNativeCaptions" ${settings.hideNativeCaptions ? "checked" : ""}>
-    </label>
-    <label>
-      <span>显示中文译文</span>
-      <input type="checkbox" data-setting="showTranslations" ${settings.showTranslations ? "checked" : ""}>
-    </label>
-    <label>
-      <span>字幕模式</span>
-      <select data-setting="subtitleMode">
-        <option value="dual" ${settings.subtitleMode === "dual" ? "selected" : ""}>双语字幕</option>
-        <option value="source" ${settings.subtitleMode === "source" ? "selected" : ""}>主字幕</option>
-        <option value="translation" ${settings.subtitleMode === "translation" ? "selected" : ""}>翻译字幕</option>
-      </select>
-    </label>
-    <h4>位置与背景</h4>
-    <label>
-      <span>字幕位置</span>
-      <span><input type="range" min="50" max="94" step="1" data-setting="overlayPositionPercent" value="${settings.overlayPositionPercent}"> <span class="yll-setting-value">${settings.overlayPositionPercent}%</span></span>
-    </label>
-    <label>
-      <span>同步校准</span>
-      <span><input type="range" min="-2000" max="2000" step="50" data-setting="syncOffsetMs" value="${settings.syncOffsetMs}"> <span class="yll-setting-value">${settings.syncOffsetMs}ms</span></span>
-    </label>
-    <label>
-      <span>逐词校准</span>
-      <span><input type="range" min="-1500" max="1500" step="50" data-setting="wordHighlightOffsetMs" value="${settings.wordHighlightOffsetMs}"> <span class="yll-setting-value">${settings.wordHighlightOffsetMs}ms</span></span>
-    </label>
-    <label>
-      <span>背景透明度</span>
-      <span><input type="range" min="20" max="95" step="1" data-setting="overlayBackgroundOpacity" value="${settings.overlayBackgroundOpacity}"> <span class="yll-setting-value">${settings.overlayBackgroundOpacity}%</span></span>
-    </label>
-    <label>
-      <span>逐词高亮</span>
-      <input type="checkbox" data-setting="highlightCurrentWord" ${settings.highlightCurrentWord ? "checked" : ""}>
-    </label>
-    <h4>原字幕样式</h4>
-    <label>
-      <span>原文字号</span>
-      <span><input type="range" min="16" max="42" step="1" data-setting="overlayFontSize" value="${settings.overlayFontSize}"> <span class="yll-setting-value">${settings.overlayFontSize}px</span></span>
-    </label>
-    <label>
-      <span>原文字体</span>
-      <select data-setting="sourceFontFamily">
-        <option value="system-ui" ${settings.sourceFontFamily === "system-ui" ? "selected" : ""}>system</option>
-        <option value="sans-serif" ${settings.sourceFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
-        <option value="serif" ${settings.sourceFontFamily === "serif" ? "selected" : ""}>serif</option>
-        <option value="monospace" ${settings.sourceFontFamily === "monospace" ? "selected" : ""}>monospace</option>
-      </select>
-    </label>
-    <h4>译文样式</h4>
-    <label>
-      <span>译文字号</span>
-      <span><input type="range" min="14" max="36" step="1" data-setting="translationFontSize" value="${settings.translationFontSize}"> <span class="yll-setting-value">${settings.translationFontSize}px</span></span>
-    </label>
-    <label>
-      <span>译文字体</span>
-      <select data-setting="translationFontFamily">
-        <option value="system-ui" ${settings.translationFontFamily === "system-ui" ? "selected" : ""}>system</option>
-        <option value="sans-serif" ${settings.translationFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
-        <option value="serif" ${settings.translationFontFamily === "serif" ? "selected" : ""}>serif</option>
-        <option value="monospace" ${settings.translationFontFamily === "monospace" ? "selected" : ""}>monospace</option>
-      </select>
-    </label>
+    <div class="yll-settings-group">
+      <h4>翻译结果</h4>
+      <label>
+        <span>目标语言</span>
+        <select disabled>
+          <option>中文(简体)</option>
+        </select>
+      </label>
+    </div>
+    <div class="yll-settings-group">
+      <h4>开启字幕功能</h4>
+      <label>
+        <span>视频双语字幕</span>
+        <input type="checkbox" data-setting="showTranslations" ${settings.showTranslations ? "checked" : ""}>
+      </label>
+      <label>
+        <span>字幕模式</span>
+        <select data-setting="subtitleMode">
+          <option value="dual" ${settings.subtitleMode === "dual" ? "selected" : ""}>双语字幕</option>
+          <option value="source" ${settings.subtitleMode === "source" ? "selected" : ""}>原文字幕</option>
+          <option value="translation" ${settings.subtitleMode === "translation" ? "selected" : ""}>译文字幕</option>
+        </select>
+      </label>
+      <label>
+        <span>字幕位置(距离底部百分比)</span>
+        <span><input type="range" min="50" max="94" step="1" data-setting="overlayPositionPercent" value="${settings.overlayPositionPercent}"> <span class="yll-setting-value">${100 - settings.overlayPositionPercent}%</span></span>
+      </label>
+      <label>
+        <span>字幕背景透明度</span>
+        <span><input type="range" min="20" max="95" step="1" data-setting="overlayBackgroundOpacity" value="${settings.overlayBackgroundOpacity}"> <span class="yll-setting-value">${settings.overlayBackgroundOpacity}%</span></span>
+      </label>
+      <label>
+        <span>悬停查词<small>鼠标悬停字幕单词时显示释义。</small></span>
+        <input type="checkbox" data-setting="highlightCurrentWord" ${settings.highlightCurrentWord ? "checked" : ""}>
+      </label>
+      <label>
+        <span>隐藏 YouTube CC</span>
+        <input type="checkbox" data-setting="hideNativeCaptions" ${settings.hideNativeCaptions ? "checked" : ""}>
+      </label>
+    </div>
+    <div class="yll-settings-group">
+      <h4>原字幕样式</h4>
+      <label>
+        <span>原字幕字号</span>
+        <span><input type="range" min="16" max="42" step="1" data-setting="overlayFontSize" value="${settings.overlayFontSize}"> <span class="yll-setting-value">${settings.overlayFontSize}px</span></span>
+      </label>
+      <label>
+        <span>原字幕字体</span>
+        <select data-setting="sourceFontFamily">
+          <option value="system-ui" ${settings.sourceFontFamily === "system-ui" ? "selected" : ""}>system</option>
+          <option value="sans-serif" ${settings.sourceFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
+          <option value="serif" ${settings.sourceFontFamily === "serif" ? "selected" : ""}>serif</option>
+          <option value="monospace" ${settings.sourceFontFamily === "monospace" ? "selected" : ""}>monospace</option>
+        </select>
+      </label>
+    </div>
+    <div class="yll-settings-group">
+      <h4>译文字幕样式</h4>
+      <label>
+        <span>译文字号</span>
+        <span><input type="range" min="14" max="36" step="1" data-setting="translationFontSize" value="${settings.translationFontSize}"> <span class="yll-setting-value">${settings.translationFontSize}px</span></span>
+      </label>
+      <label>
+        <span>译文字体</span>
+        <select data-setting="translationFontFamily">
+          <option value="system-ui" ${settings.translationFontFamily === "system-ui" ? "selected" : ""}>system</option>
+          <option value="sans-serif" ${settings.translationFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
+          <option value="serif" ${settings.translationFontFamily === "serif" ? "selected" : ""}>serif</option>
+          <option value="monospace" ${settings.translationFontFamily === "monospace" ? "selected" : ""}>monospace</option>
+        </select>
+      </label>
+    </div>
+    <div class="yll-settings-group">
+      <h4>同步校准</h4>
+      <label>
+        <span>整句同步</span>
+        <span><input type="range" min="-2000" max="2000" step="50" data-setting="syncOffsetMs" value="${settings.syncOffsetMs}"> <span class="yll-setting-value">${settings.syncOffsetMs}ms</span></span>
+      </label>
+      <label>
+        <span>逐词高亮同步</span>
+        <span><input type="range" min="-1500" max="1500" step="50" data-setting="wordHighlightOffsetMs" value="${settings.wordHighlightOffsetMs}"> <span class="yll-setting-value">${settings.wordHighlightOffsetMs}ms</span></span>
+      </label>
+    </div>
+    <div class="yll-settings-group">
+      <h4>样式预览</h4>
+      <div class="yll-preview-box">You can read<br>the <span>demo</span> content<br>您可以查看示例内容</div>
+    </div>
   `;
 }
 
@@ -5481,6 +5563,10 @@ window.addEventListener("yll-save-current-sentence", () => {
     }
     setStatus(await saveSentenceNote(cue) ? "当前句已收藏。" : "当前句收藏失败。");
   });
+});
+window.addEventListener("yll-open-settings", () => {
+  mountPanel();
+  toggleSettingsPanel();
 });
 window.addEventListener("yll-open-library", () => {
   void requireSignedInFeature("学习库").then((allowed) => {

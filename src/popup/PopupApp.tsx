@@ -326,6 +326,17 @@ export function PopupApp() {
     }
   };
 
+  const openSubtitleSettingsPanel = async () => {
+    try {
+      setStatus("正在打开字幕设置面板...");
+      await wakeSafeContentScript("新版字幕面板已唤醒。");
+      const opened = await dispatchActiveYouTubeEvent("yll-open-settings");
+      setStatus(opened ? "字幕设置面板已打开。" : "请先切换到 YouTube 视频播放页。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "字幕设置面板打开失败。");
+    }
+  };
+
   const loadMiniCaptions = async () => {
     try {
       setStatus("正在唤醒新版字幕读取任务...");
@@ -946,8 +957,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.138 待审核</strong>
-              <p>修复默认词本重复、词本删除和黑白名单管理。</p>
+              <strong>0.1.139 待审核</strong>
+              <p>修复字幕设置面板打开，并重做字幕样式设置。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -1100,7 +1111,7 @@ export function PopupApp() {
                   checked={settings.hideNativeCaptions}
                   onChange={(checked) => void updateSettings({ hideNativeCaptions: checked })}
                 />
-                <ActionSetting icon={<Settings size={17} />} label="字幕设置" value="打开面板" onClick={mountMiniPanel} />
+                <ActionSetting icon={<Settings size={17} />} label="字幕设置" value="打开面板" onClick={openSubtitleSettingsPanel} />
               </SettingsSection>
 
               {isSignedIn ? (

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 10:18:00 CST
+Last updated: 2026-06-07 10:42:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -27,7 +27,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
 | Free translation fallback | In Review | 2026-06-06 19:57 CST | `0.1.126` prioritizes current-cue translation, uses a smaller first batch, and stops invalidated stale scripts to avoid overlay flicker | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | In Review | 2026-06-06 13:51 CST | `0.1.115` enables hover/click lookup on video overlay words and reuses cached or pending free-translation lookups | Needs Chrome hover review. |
-| Subtitle settings panel | In Review | 2026-06-04 23:29 CST | `0.1.107` adds an internal close button and slightly narrows the floating settings panel | Needs extension reload and Chrome review. |
+| Subtitle settings panel | In Review | 2026-06-07 10:42 CST | `0.1.139` fixes the popup `打开面板` action and rebuilds the floating settings panel with grouped subtitle/style controls and preview | Needs extension reload and Chrome review. |
 | Practice mode shell | In Review | 2026-06-06 22:52 CST | `0.1.135` keeps practice entry points in signed-in popup/settings/learning-library views instead of the subtitle-only right panel | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
@@ -387,6 +387,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
 - Local `0.1.138` popup version-card compacting:
   - reduced the current-version status card padding and margin, aligned the badge vertically, and constrained the description to a single ellipsized line
   - local checks passed: `npm run build`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.139` subtitle settings panel recovery:
+  - popup `字幕设置 / 打开面板` now dispatches a dedicated `yll-open-settings` event instead of only waking the caption reader
+  - content script listens for `yll-open-settings`, mounts the subtitle panel if needed, and toggles the settings panel
+  - rebuilt the floating subtitle settings panel with Relingo-style grouped rows for video subtitles, original/translation font size, opacity, sync calibration, and style preview
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 
 ### 2026-06-03

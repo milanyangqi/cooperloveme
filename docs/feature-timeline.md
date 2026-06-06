@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-04 20:28:52 CST
+Last updated: 2026-06-06 11:16:02 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,28 +18,28 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-04 19:54 CST | `0.1.100` adds startup official-caption re-reads after the YouTube player stabilizes | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-06 11:16 CST | `0.1.113` reads background snapshot and watch-page player response in parallel, then merges all discovered caption tracks | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
-| Right-side caption panel with full sentences | In Review | 2026-06-04 19:42 CST | `0.1.99` keeps row actions hidden until active/hover/focus so the list stays compact | Needs Chrome review after extension reload. |
+| Right-side caption panel with full sentences | In Review | 2026-06-05 08:27 CST | `0.1.110` changes the header to auto height so toolbar tabs such as `学习库` are not covered by the subtitle list | Needs Chrome review after extension reload. |
 | Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-04 12:57 CST | `0.1.93` renders rows in chronological order and scrolls the active row into the lower part of the taller panel so playback moves upward | Needs extension reload and Chrome review on long videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
-| Bilingual overlay on video | In Review | 2026-06-04 20:18 CST | `0.1.102` pauses overlay, active rows, fallback collection, and official retry while ads play | Needs extension reload and ad playback review. |
+| Bilingual overlay on video | In Review | 2026-06-06 11:16 CST | `0.1.113` makes word highlighting ignore sparse timing maps and use readable-duration pacing when needed | Needs extension reload and spoken-audio review. |
 | Free translation fallback | In Review | 2026-06-04 20:28 CST | `0.1.103` limits free web translation concurrency and retries once after transient failures | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | Partial | 2026-06-04 19:10 CST | Word spans, vocabulary save, and `0.1.97` persistent row-level sentence explanation are implemented | Needs Chrome review and later AI-backed explanation. |
-| Subtitle settings panel | In Review | 2026-06-03 14:10 CST | `0.1.83` adds a right-panel subtitle-mode selector and logs mode changes for diagnostics | Needs extension reload and Chrome review. |
-| Practice mode shell | In Review | 2026-06-03 09:51 CST | `0.1.80` restores the popup full-practice entry and lets saved sentences open the mixed-practice overlay | Needs manual Chrome review; full Trancy-style layout still planned. |
+| Subtitle settings panel | In Review | 2026-06-04 23:29 CST | `0.1.107` adds an internal close button and slightly narrows the floating settings panel | Needs extension reload and Chrome review. |
+| Practice mode shell | In Review | 2026-06-04 20:46 CST | `0.1.105` makes the practice entry choose the current playback cue when no active row is set | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
 | Comprehension quiz mode | In Review | 2026-06-03 13:05 CST | `0.1.81` saves quiz attempts to the local practice history after an option is selected | Needs generated questions and richer feedback. |
 | Sentence save / collection | In Review | 2026-06-04 17:49 CST | `0.1.94` restores per-row practice and save actions in the right-side caption list | Needs extension reload and Chrome review. |
-| Vocabulary library | In Review | 2026-06-02 21:31 CST | `0.1.73` refreshes versioned styles so saved vocabulary renders correctly in the local library | Word save was verified on `0.1.66`; broader library UI now awaits review. |
+| Vocabulary library | In Review | 2026-06-04 23:14 CST | `0.1.106` adds explicit library open state and debounce so the learning library no longer flashes closed after clicking | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-03 13:05 CST | `0.1.81` adds JSON, CSV, and Anki CSV exports inside the local library panel | Needs Chrome download review; advanced Pro export can be expanded later. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
-| Caption diagnostics panel | In Review | 2026-06-03 14:16 CST | `0.1.86` records final row/translation summaries and adds one-click diagnostic log copy | Keep debug UI available during recovery; hide from production later. |
+| Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
 | Stale content-script protection | In Review | 2026-06-02 21:57 CST | `0.1.75` handles `Extension context invalidated` and points users to popup wake-up | Needs extension reload and Chrome review to confirm stale panels stop misleading QA. |
 
 ## Timeline
@@ -123,6 +123,69 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - free Google web translation previously sent one full subtitle batch concurrently, which could make translations fail or return empty during rate limiting
   - changed free translation to a small 4-request concurrency queue with one short retry per cue
   - the UI and AI translation path are unchanged; this only stabilizes the V1 no-API translation fallback
+  - pending extension reload and Chrome review
+
+- Local `0.1.104` production panel cleanup:
+  - removed the always-visible `诊断日志` toolbar button from the right-side panel
+  - diagnostic logs are still available by Alt-clicking the `YouTube Language Lab` title, so debugging remains possible without cluttering normal use
+  - pending extension reload and Chrome review
+
+- Local `0.1.105` current-cue practice recovery:
+  - `练习当前句` previously fell back to the first subtitle row when the active row key was not set yet
+  - it now selects the cue nearest to the current video clock, so the practice entry follows playback even before the list has highlighted a row
+  - pending extension reload and Chrome review
+
+- Local `0.1.106` learning-library lifecycle recovery:
+  - user reported clicking `学习库` flashes the panel and immediately closes it
+  - added explicit library open state and a short toggle debounce
+  - normal YouTube page/video-state refresh no longer closes the learning library panel
+  - close buttons, extension-context invalidation, and practice-from-library now use one close helper that clears state consistently
+  - pending extension reload and Chrome review
+
+- Local `0.1.107` caption-panel empty-state recovery:
+  - screenshot showed a large blank right-side subtitle area while the page was in an ad/loading state
+  - right-side list now renders an explicit empty state for ads, official-caption loading, and no-subtitle cases
+  - floating subtitle settings panel now has an internal close button and a narrower width to reduce overlap
+  - pending extension reload and Chrome review
+
+- Local `0.1.108` official-caption startup speed recovery:
+  - official-caption startup retries previously waited until 1800ms, which made fresh YouTube pages feel slow
+  - startup probing now runs at 250ms, 900ms, 1800ms, 5200ms, and 11000ms
+  - slower retries remain in place so early misses do not prevent later official-track recovery
+  - pending extension reload and Chrome review
+
+- Local `0.1.109` right-panel height recovery:
+  - previous panel height was capped at 860px even on tall displays
+  - max panel height is now 1040px and the header is slightly shorter
+  - this should show more subtitle rows without changing the panel anchor position
+  - pending extension reload and Chrome review
+
+- Local `0.1.110` panel-header and source-state recovery:
+  - user screenshot showed the right subtitle list covering the `学习库` toolbar area after the header was compacted
+  - header now uses auto height with a larger minimum instead of a fixed clipped height
+  - caption status now includes a source badge: `官方`, `Transcript`, `TimedText`, `TextTrack`, or `页面采集`
+  - fallback-to-official retry interval shortened from 12s to 6s so page-capture rows do not delay official-track recovery as long
+  - pending extension reload and Chrome review
+
+- Local `0.1.111` official-caption parser recovery:
+  - compared the current safe script with the older `src/content/youtube.ts` caption parser
+  - official caption bodies now tolerate YouTube's `)]}'` JSON prefix
+  - official caption parsing now supports `WEBVTT` and XML `<p t d>` paragraph nodes in addition to json3 and `<text start dur>`
+  - this reduces cases where an official caption request succeeds but parses into zero rows
+  - pending extension reload and Chrome review
+
+- Local `0.1.112` official-caption multi-format recovery:
+  - each official caption track now tries `fmt=json3`, `fmt=srv3`, and `fmt=vtt`
+  - this reduces cases where the track exists but one requested format returns empty or unparsable text
+  - debug logs now include the attempted caption format per track request
+  - pending extension reload and Chrome review
+
+- Local `0.1.113` official-caption speed and word-highlight recovery:
+  - official loading now reads the background snapshot and watch-page HTML player response in parallel
+  - the watch-page HTML response is capped at 1.6s so it can add tracks without delaying faster sources
+  - caption tracks from snapshot, inline scripts, fetched watch HTML, and YouTubei are merged before trying `json3` / `srv3` / `vtt`
+  - word highlighting now rejects sparse or mismatched JSON3 word timings instead of mapping them directly to rendered words
+  - estimated word highlighting now uses the overlay readable duration, so extended subtitle display no longer jumps directly to the final word
   - pending extension reload and Chrome review
 
 ### 2026-06-03

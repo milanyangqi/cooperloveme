@@ -125,18 +125,19 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.103";
+const SCRIPT_VERSION = "0.1.113";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
 const DEFAULT_DISPLAY_LEAD_MS = 250;
 const DEFAULT_WORD_HIGHLIGHT_OFFSET_MS = 0;
 const MIN_OVERLAY_DURATION_MS = 3200;
-const MIN_ESTIMATED_WORD_DURATION_MS = 150;
+const MIN_ESTIMATED_WORD_DURATION_MS = 210;
+const MIN_TIMED_WORD_COVERAGE_RATIO = 0.82;
 const TARGET_LANGUAGE = "zh-CN";
 const TRANSLATION_BATCH_SIZE = 18;
 const OFFICIAL_RETRY_MS = 3500;
-const OFFICIAL_FALLBACK_RETRY_MS = 12000;
+const OFFICIAL_FALLBACK_RETRY_MS = 6000;
 const OFFICIAL_AUTO_ATTEMPTS = 2;
 const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 3500;
 const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 8500;
@@ -209,6 +210,8 @@ const runtime = window as typeof window & {
   __yllSafeSuppressListScrollUntil?: number;
   __yllSafeExpandedInsightKey?: string;
   __yllSafeWasAdShowing?: boolean;
+  __yllSafeLibraryOpen?: boolean;
+  __yllSafeLastLibraryToggleAt?: number;
   __yllTimedTextBridgeListening?: boolean;
   __yllTimedTextBridgeInstalled?: boolean;
   __yllCapturedTimedText?: CapturedTimedText[];
@@ -258,6 +261,7 @@ function stopCurrentScriptInstance() {
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeCanUseVisibleFallback = false;
   runtime.__yllSafeExpandedInsightKey = undefined;
+  runtime.__yllSafeLibraryOpen = false;
   document.getElementById(PANEL_ID)?.remove();
   document.getElementById(OVERLAY_ID)?.remove();
   document.getElementById(WORD_POPOVER_ID)?.remove();
@@ -472,7 +476,7 @@ function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || words.length || 1;
   const cueDurationMs = cue.durationMs > 0 ? cue.durationMs : words.length * 260;
   const minimumReadableDurationMs = words.length * MIN_ESTIMATED_WORD_DURATION_MS;
-  const highlightDurationMs = Math.max(1, Math.max(cueDurationMs, minimumReadableDurationMs));
+  const highlightDurationMs = Math.max(1, Math.max(cueDurationMs, MIN_OVERLAY_DURATION_MS, minimumReadableDurationMs));
   const targetWeight = Math.min(totalWeight - 0.001, Math.max(0, (elapsedMs / highlightDurationMs) * totalWeight));
   let cursor = 0;
   for (let index = 0; index < weights.length; index += 1) {
@@ -484,17 +488,29 @@ function activeWordIndexForCue(cue: LabCue, words: RegExpMatchArray[], currentMs
 
 function activeWordIndexFromTimings(cue: LabCue, wordCountValue: number, currentMs: number) {
   const timings = (cue.wordTimings ?? []).filter((timing) => timing.endMs > timing.startMs);
-  if (!timings.length || Math.abs(timings.length - wordCountValue) > Math.max(2, wordCountValue * 0.35)) return undefined;
+  if (!timings.length) return undefined;
+  const coverageRatio = Math.min(timings.length, wordCountValue) / Math.max(timings.length, wordCountValue, 1);
+  if (coverageRatio < MIN_TIMED_WORD_COVERAGE_RATIO) return undefined;
+
   const normalizedCurrentMs = Math.max(cue.startMs, currentMs);
   const activeIndex = timings.findIndex((timing, index) => {
     const nextStart = timings[index + 1]?.startMs ?? timing.endMs;
     return normalizedCurrentMs >= timing.startMs - 80 && normalizedCurrentMs < Math.max(timing.endMs, nextStart);
   });
-  if (activeIndex >= 0) return Math.min(wordCountValue - 1, activeIndex);
+  if (activeIndex >= 0) return mapTimingIndexToWordIndex(activeIndex, timings.length, wordCountValue);
+  const readableEndMs = cue.startMs + Math.max(cue.durationMs, MIN_OVERLAY_DURATION_MS, wordCountValue * MIN_ESTIMATED_WORD_DURATION_MS);
+  if (normalizedCurrentMs < readableEndMs) return undefined;
   for (let index = timings.length - 1; index >= 0; index -= 1) {
-    if (timings[index].startMs <= normalizedCurrentMs) return Math.min(wordCountValue - 1, index);
+    if (timings[index].startMs <= normalizedCurrentMs) return mapTimingIndexToWordIndex(index, timings.length, wordCountValue);
   }
   return 0;
+}
+
+function mapTimingIndexToWordIndex(timingIndex: number, timingCount: number, wordCountValue: number) {
+  if (wordCountValue <= 1) return 0;
+  if (timingCount === wordCountValue) return Math.max(0, Math.min(wordCountValue - 1, timingIndex));
+  const ratio = timingIndex / Math.max(1, timingCount - 1);
+  return Math.max(0, Math.min(wordCountValue - 1, Math.round(ratio * (wordCountValue - 1))));
 }
 
 function wordHighlightWeight(word: string, followingText: string) {
@@ -690,7 +706,7 @@ function installStyle() {
       top: 76px;
       z-index: 2147483647;
       width: 370px;
-      height: clamp(520px, calc(100dvh - 72px), 860px);
+      height: clamp(520px, calc(100dvh - 92px), 1040px);
       overflow: hidden;
       background: #202224;
       color: #f7f8f8;
@@ -704,12 +720,12 @@ function installStyle() {
     }
     #${PANEL_ID} * { box-sizing: border-box; }
     #${PANEL_ID} .yll-head {
-      flex: 0 0 112px;
-      height: 112px;
+      flex: 0 0 auto;
+      min-height: 128px;
       padding: 12px;
       border-bottom: 1px solid rgba(255,255,255,.12);
       background: #202224;
-      overflow: hidden;
+      overflow: visible;
     }
     #${PANEL_ID} .yll-title-row {
       display: flex;
@@ -765,13 +781,24 @@ function installStyle() {
     }
     #${STATUS_ID} {
       margin-top: 8px;
-      height: 30px;
+      min-height: 30px;
       overflow: hidden;
       color: #a3aab5;
       font-size: 12px;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
+    }
+    #${STATUS_ID} .yll-source-badge {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      color: #111;
+      background: #ffc857;
+      font-size: 11px;
+      font-weight: 800;
+      vertical-align: 1px;
     }
     #${LIST_ID} {
       flex: 1 1 auto;
@@ -842,6 +869,22 @@ function installStyle() {
       color: #111;
       background: #ffc857;
       outline: none;
+    }
+    #${LIST_ID} .yll-empty-state {
+      margin: 18px 14px;
+      padding: 14px;
+      color: #c7ccd4;
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(255,255,255,.11);
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    #${LIST_ID} .yll-empty-state strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #f7f8f8;
+      font-size: 14px;
     }
     #${LIST_ID} .yll-row-insight {
       grid-column: 2 / 3;
@@ -926,7 +969,7 @@ function installStyle() {
       z-index: 2147483647;
       right: 394px;
       top: 76px;
-      width: 300px;
+      width: 286px;
       max-width: calc(100vw - 430px);
       max-height: calc(100dvh - 112px);
       padding: 14px;
@@ -938,7 +981,25 @@ function installStyle() {
       font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       overflow-y: auto;
     }
-    #${SETTINGS_PANEL_ID} h3 { margin: 0 0 10px; font-size: 15px; }
+    #${SETTINGS_PANEL_ID} .yll-settings-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    #${SETTINGS_PANEL_ID} h3 { margin: 0; font-size: 15px; }
+    #${SETTINGS_PANEL_ID} .yll-settings-close {
+      min-height: 26px;
+      padding: 0 9px;
+      color: #f7f8f8;
+      background: #2d3034;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 750;
+      cursor: pointer;
+    }
     #${SETTINGS_PANEL_ID} h4 {
       margin: 14px 0 6px;
       padding-top: 12px;
@@ -1319,7 +1380,6 @@ function mountPanel() {
         <button class="yll-tool" type="button" data-yll-action="practice">练习当前句</button>
         <button class="yll-tool secondary" type="button" data-yll-action="settings">字幕设置</button>
         <button class="yll-tool secondary" type="button" data-yll-action="library">学习库</button>
-        <button class="yll-tool secondary" type="button" data-yll-action="debug">诊断日志</button>
       </div>
       <div id="${STATUS_ID}">正在连接当前 YouTube 视频页...</div>
     </div>
@@ -1331,7 +1391,7 @@ function mountPanel() {
     document.getElementById(WORD_POPOVER_ID)?.remove();
     document.getElementById(SETTINGS_PANEL_ID)?.remove();
     document.getElementById(PRACTICE_ID)?.remove();
-    document.getElementById(LIBRARY_PANEL_ID)?.remove();
+    closeLibraryPanel();
     document.documentElement.classList.remove("yll-hide-native-captions");
     if (runtime.__yllSafeTimer) window.clearInterval(runtime.__yllSafeTimer);
     runtime.__yllSafeTimer = undefined;
@@ -1352,10 +1412,13 @@ function mountPanel() {
   panel.querySelector<HTMLButtonElement>('[data-yll-action="practice"]')?.addEventListener("click", () => {
     openPracticeOverlay();
   });
-  panel.querySelector<HTMLButtonElement>('[data-yll-action="library"]')?.addEventListener("click", () => {
+  panel.querySelector<HTMLButtonElement>('[data-yll-action="library"]')?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     void toggleLibraryPanel();
   });
-  panel.querySelector<HTMLButtonElement>('[data-yll-action="debug"]')?.addEventListener("click", () => {
+  panel.querySelector<HTMLElement>(".yll-title")?.addEventListener("click", (event) => {
+    if (!event.altKey) return;
     toggleDebugPanel();
   });
   document.documentElement.appendChild(panel);
@@ -1388,6 +1451,26 @@ function setStatus(text: string) {
     status.textContent = text;
     status.title = text;
   }
+}
+
+function setCaptionStatus(text: string, sourceLabel?: string) {
+  const status = document.getElementById(STATUS_ID);
+  if (!status) return;
+  const badge = sourceLabel ? captionSourceBadge(sourceLabel) : "";
+  status.innerHTML = `${badge}${escapeHtml(text)}`;
+  status.title = sourceLabel ? `${captionSourceText(sourceLabel)} · ${text}` : text;
+}
+
+function captionSourceText(sourceLabel: string) {
+  if (/页面字幕|采集|visible/i.test(sourceLabel)) return "页面采集";
+  if (/Transcript|transcript/i.test(sourceLabel)) return "Transcript";
+  if (/textTracks/i.test(sourceLabel)) return "TextTrack";
+  if (/timedtext/i.test(sourceLabel)) return "TimedText";
+  return "官方";
+}
+
+function captionSourceBadge(sourceLabel: string) {
+  return `<span class="yll-source-badge">${escapeHtml(captionSourceText(sourceLabel))}</span>`;
 }
 
 function addDebugLog(event: string, details?: unknown) {
@@ -1429,11 +1512,17 @@ function debugSnapshot() {
 }
 
 async function toggleLibraryPanel() {
+  const now = Date.now();
+  if (runtime.__yllSafeLastLibraryToggleAt && now - runtime.__yllSafeLastLibraryToggleAt < 350) return;
+  runtime.__yllSafeLastLibraryToggleAt = now;
+
   const existing = document.getElementById(LIBRARY_PANEL_ID);
   if (existing) {
+    runtime.__yllSafeLibraryOpen = false;
     existing.remove();
     return;
   }
+  runtime.__yllSafeLibraryOpen = true;
 
   const panel = document.createElement("section");
   panel.id = LIBRARY_PANEL_ID;
@@ -1444,7 +1533,7 @@ async function toggleLibraryPanel() {
     </div>
     <div class="yll-library-empty">正在读取本地学习记录...</div>
   `;
-  panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => panel.remove());
+  panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => closeLibraryPanel());
   const host = document.getElementById(PANEL_ID) ?? document.documentElement;
   const list = document.getElementById(LIST_ID);
   if (host === document.documentElement || !list) {
@@ -1469,8 +1558,13 @@ async function toggleLibraryPanel() {
       </div>
       <div class="yll-library-empty">${escapeHtml(message)}</div>
     `;
-    panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => panel.remove());
+    panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => closeLibraryPanel());
   }
+}
+
+function closeLibraryPanel() {
+  runtime.__yllSafeLibraryOpen = false;
+  document.getElementById(LIBRARY_PANEL_ID)?.remove();
 }
 
 function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
@@ -1506,7 +1600,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       sub: item.expected || formatLibraryTime(item.createdAt)
     }))}
   `;
-  panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => panel.remove());
+  panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => closeLibraryPanel());
   panel.querySelector<HTMLButtonElement>("[data-library-export-json]")?.addEventListener("click", async (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     const originalLabel = button.textContent ?? "导出 JSON";
@@ -1542,7 +1636,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
   panel.querySelector<HTMLButtonElement>("[data-library-practice-sentences]")?.addEventListener("click", () => {
     const practiceRows = sentenceNotesToPracticeRows(sentenceNotes);
     if (!practiceRows.length) return;
-    panel.remove();
+    closeLibraryPanel();
     openPracticeOverlay(practiceRows, 0);
   });
 }
@@ -1884,7 +1978,10 @@ function renderSettingsPanel() {
 
 function settingsPanelHtml(settings: SafeSettings) {
   return `
-    <h3>视频字幕</h3>
+    <div class="yll-settings-head">
+      <h3>视频字幕</h3>
+      <button class="yll-settings-close" type="button" data-settings-close>关闭</button>
+    </div>
     <h4>字幕功能</h4>
     <label>
       <span>隐藏 YouTube 原生字幕</span>
@@ -1955,6 +2052,9 @@ function settingsPanelHtml(settings: SafeSettings) {
 }
 
 function bindSettingsPanel(panel: HTMLElement) {
+  panel.querySelector<HTMLButtonElement>("[data-settings-close]")?.addEventListener("click", () => {
+    panel.remove();
+  });
   panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input[data-setting], select[data-setting]").forEach((input) => {
     input.addEventListener("input", () => {
       const current = loadSafeSettings();
@@ -1985,7 +2085,11 @@ function currentCue() {
   const rows = runtime.__yllSafeRows ?? [];
   if (!rows.length) return undefined;
   const activeKey = runtime.__yllSafeActiveKey;
-  return rows.find((cue) => cueKey(cue) === activeKey) ?? rows[0];
+  const activeCue = rows.find((cue) => cueKey(cue) === activeKey);
+  if (activeCue) return activeCue;
+  const video = getMainVideo();
+  if (video) return selectActiveCue(rows, syncedCurrentMs(video, loadSafeSettings())) ?? rows[0];
+  return rows[0];
 }
 
 async function saveSentenceNote(cue: LabCue) {
@@ -2441,6 +2545,20 @@ function renderRows(rows: LabCue[]) {
   const sorted = [...rows].sort((a, b) => a.startMs - b.startMs);
   runtime.__yllSafeSuppressListScrollUntil = Date.now() + 800;
   runtime.__yllSafeLastManualListScrollAt = 0;
+  if (!sorted.length) {
+    const title = isYouTubeAdShowing()
+      ? "广告播放中"
+      : runtime.__yllSafeIsLoadingOfficial
+        ? "正在读取官方字幕"
+        : "还没有字幕";
+    const detail = isYouTubeAdShowing()
+      ? "插件字幕会在广告结束后恢复，右侧列表暂时保持为空。"
+      : runtime.__yllSafeIsLoadingOfficial
+        ? "正在等待 YouTube 字幕轨道返回；如果长时间没有结果，可以点击“重读字幕”。"
+        : "当前视频还没有加载到可用字幕。请确认视频有字幕轨，或稍后点击“重读字幕”。";
+    list.innerHTML = `<div class="yll-empty-state"><strong>${title}</strong>${detail}</div>`;
+    return;
+  }
   list.innerHTML = sorted
     .map((cue) => {
       const key = cueKey(cue);
@@ -2651,7 +2769,8 @@ function scheduleOfficialRetry(delayMs: number, reason: string) {
 
 function scheduleStartupOfficialRetries(videoId: string) {
   clearStartupOfficialRetries();
-  runtime.__yllSafeStartupRetryTimers = [1800, 5200, 11000].map((delayMs) =>
+  const delays = [250, 900, 1800, 5200, 11000];
+  runtime.__yllSafeStartupRetryTimers = delays.map((delayMs) =>
     window.setTimeout(() => {
       if (getVideoId() !== videoId || hasOfficialRows()) return;
       if (isYouTubeAdShowing()) {
@@ -2668,7 +2787,7 @@ function scheduleStartupOfficialRetries(videoId: string) {
       });
     }, delayMs)
   );
-  addDebugLog("load:startup-retry-scheduled", { videoId, delays: [1800, 5200, 11000] });
+  addDebugLog("load:startup-retry-scheduled", { videoId, delays });
 }
 
 function saveRows(rows: LabCue[], sourceLabel: string) {
@@ -2748,7 +2867,7 @@ function saveRows(rows: LabCue[], sourceLabel: string) {
     translatedRows: runtime.__yllSafeRows.filter((cue) => cue.translatedText).length,
     hideNativeCaptions: document.documentElement.classList.contains("yll-hide-native-captions")
   });
-  setStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕，来源：${sourceLabel}。`);
+  setCaptionStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕。`, sourceLabel);
   updateActiveCue();
   void translateRowsForCurrentVideo(sourceLabel);
 }
@@ -2765,7 +2884,7 @@ function isExtensionContextInvalidated(message?: string) {
 function handleInvalidatedExtensionContext() {
   setStatus("扩展上下文已过期。请点击 popup 的“唤醒面板”重新注入新版脚本。");
   addDebugLog("extension-context-invalidated", { version: SCRIPT_VERSION });
-  document.getElementById(LIBRARY_PANEL_ID)?.remove();
+  closeLibraryPanel();
   document.getElementById(WORD_POPOVER_ID)?.remove();
 }
 
@@ -3071,7 +3190,7 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
   }
 
   try {
-    setStatus(`已加载 ${rows.length} 条字幕，来源：${sourceLabel}；正在生成中文译文...`);
+    setCaptionStatus(`已加载 ${rows.length} 条字幕；正在生成中文译文...`, sourceLabel);
     const translatedByKey = new Map<string, { translatedText?: string; provider?: string }>();
     for (let index = 0; index < translatable.length; index += TRANSLATION_BATCH_SIZE) {
       if (runtime.__yllSafeTranslationToken !== token || getVideoId() !== videoId) return;
@@ -3096,7 +3215,7 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
           });
         });
       } catch (error) {
-        setStatus(`已加载 ${rows.length} 条字幕；免费翻译暂时不可用：${toErrorMessage(error)}`);
+        setCaptionStatus(`已加载 ${rows.length} 条字幕；免费翻译暂时不可用：${toErrorMessage(error)}`, sourceLabel);
         break;
       }
 
@@ -3111,7 +3230,7 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
       });
       renderRows(runtime.__yllSafeRows);
       updateActiveCue();
-      setStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕，来源：${sourceLabel}；译文同步中 ${Math.min(index + TRANSLATION_BATCH_SIZE, translatable.length)}/${translatable.length}`);
+      setCaptionStatus(`已加载 ${runtime.__yllSafeRows.length} 条字幕；译文同步中 ${Math.min(index + TRANSLATION_BATCH_SIZE, translatable.length)}/${translatable.length}`, sourceLabel);
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     if (runtime.__yllSafeTranslationToken === token && getVideoId() === videoId) {
@@ -3122,10 +3241,10 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
         translatedRows
       });
       if (translatedRows > 0) {
-        setStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕，来源：${sourceLabel}；中文译文已生成。`);
+        setCaptionStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕；中文译文已生成。`, sourceLabel);
       } else {
         runtime.__yllSafeTranslatedVideoId = undefined;
-        setStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕，来源：${sourceLabel}；中文译文暂未生成，稍后会重试。`);
+        setCaptionStatus(`已加载 ${runtime.__yllSafeRows?.length ?? rows.length} 条字幕；中文译文暂未生成，稍后会重试。`, sourceLabel);
         window.setTimeout(() => {
           if (getVideoId() === videoId && !(runtime.__yllSafeRows ?? []).some((cue) => cue.translatedText)) {
             void translateRowsForCurrentVideo(sourceLabel);
@@ -3135,7 +3254,7 @@ async function translateRowsForCurrentVideo(sourceLabel: string) {
     }
   } catch (error) {
     addDebugLog("translation:error", { sourceLabel, error: toErrorMessage(error) });
-    setStatus(`已加载 ${rows.length} 条字幕；翻译流程异常：${toErrorMessage(error)}`);
+    setCaptionStatus(`已加载 ${rows.length} 条字幕；翻译流程异常：${toErrorMessage(error)}`, sourceLabel);
   } finally {
     if (runtime.__yllSafeTranslationToken === token) runtime.__yllSafeIsTranslating = false;
   }
@@ -3709,17 +3828,20 @@ async function loadRowsFromTranscriptPanel(videoId: string) {
 }
 
 function parseCaptionBody(videoId: string, body: string, source: LabCue["source"]) {
+  const trimmed = stripJsonPrefix(body.trim());
   try {
-    const data = JSON.parse(body) as { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> };
+    const data = JSON.parse(trimmed) as { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> };
     const rows = parseJson3Rows(videoId, data, source);
     if (rows.length) return rows;
   } catch {
     // Fall through to XML parsing.
   }
 
-  const documentValue = new DOMParser().parseFromString(body, "text/xml");
+  if (trimmed.startsWith("WEBVTT")) return parseVttRows(videoId, trimmed, source);
+
+  const documentValue = new DOMParser().parseFromString(trimmed, "text/xml");
   const textNodes = Array.from(documentValue.querySelectorAll("text"));
-  return textNodes
+  const textRows = textNodes
     .map((node) => {
       const startSeconds = Number(node.getAttribute("start") ?? "0");
       const durationSeconds = Number(node.getAttribute("dur") ?? "1.8");
@@ -3733,6 +3855,67 @@ function parseCaptionBody(videoId: string, body: string, source: LabCue["source"
       };
     })
     .filter(Boolean) as LabCue[];
+  if (textRows.length) return textRows;
+
+  return Array.from(documentValue.querySelectorAll("p"))
+    .map((node) => {
+      const startMs = Number(node.getAttribute("t") ?? "0");
+      const durationMs = Number(node.getAttribute("d") ?? "1800");
+      const text = cleanText(node.textContent ?? "");
+      if (!text || Number.isNaN(startMs)) return undefined;
+      return {
+        startMs: Math.max(0, Math.round(startMs)),
+        durationMs: Math.max(500, Math.round(Number.isNaN(durationMs) ? 1800 : durationMs)),
+        text,
+        source
+      };
+    })
+    .filter(Boolean) as LabCue[];
+}
+
+function stripJsonPrefix(value: string) {
+  return value.replace(/^\)\]\}'\s*/, "");
+}
+
+function parseVttRows(videoId: string, body: string, source: LabCue["source"]) {
+  const rows: LabCue[] = [];
+  const blocks = body.replace(/\r/g, "").split(/\n{2,}/);
+  const timestampPattern = /((?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}\.\d{3})/;
+
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const timestampIndex = lines.findIndex((line) => timestampPattern.test(line));
+    if (timestampIndex < 0) continue;
+    const match = lines[timestampIndex]?.match(timestampPattern);
+    if (!match) continue;
+    const startMs = parseVttTimestamp(match[1]);
+    const endMs = parseVttTimestamp(match[2]);
+    const text = cleanText(lines
+      .slice(timestampIndex + 1)
+      .filter((line) => !line.startsWith("NOTE") && !line.startsWith("STYLE"))
+      .join(" ")
+      .replace(/<[^>]+>/g, " "));
+    if (!text) continue;
+    rows.push({
+      startMs,
+      durationMs: Math.max(500, endMs - startMs),
+      text,
+      source
+    });
+  }
+
+  return rows.filter((cue) => cue.text && videoId);
+}
+
+function parseVttTimestamp(value: string) {
+  const parts = value.split(":");
+  const seconds = Number(parts.pop()?.replace(",", ".") ?? "0");
+  const minutes = Number(parts.pop() ?? "0");
+  const hours = Number(parts.pop() ?? "0");
+  return Math.max(0, Math.round(((hours * 60 + minutes) * 60 + seconds) * 1000));
 }
 
 async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], source: LabCue["source"]) {
@@ -3746,20 +3929,23 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
     const baseUrl = track.baseUrl ?? track.base_url ?? track.url;
     if (!baseUrl) continue;
 
-    const url = new URL(baseUrl, location.href);
-    if (!url.searchParams.get("fmt")) url.searchParams.set("fmt", "json3");
     const language = track.languageCode ?? track.language_code ?? getTrackName(track) ?? "unknown";
-    try {
-      addDebugLog("tracks:fetch", { source, language, host: url.hostname, token: captionUrlRequiresPoToken(url) });
-      const body = await fetchCaptionText(url.toString());
-      const rows = parseCaptionBody(videoId, body, source).filter((cue) => cue.text && videoId && language);
-      addDebugLog("tracks:parsed", { source, language, body: body.length, rows: rows.length });
-      if (rows.length) return mergeAdjacentCues(rows);
-      const tokenHint = captionUrlRequiresPoToken(url) && !body.trim() ? " token-gated exp=xpe" : "";
-      failures.push(`${language}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`);
-    } catch (error) {
-      const tokenHint = captionUrlRequiresPoToken(url) ? " token-gated exp=xpe;" : "";
-      failures.push(`${language}:${tokenHint} ${toErrorMessage(error)}`);
+    const formats = ["json3", "srv3", "vtt"];
+    for (const format of formats) {
+      const url = new URL(baseUrl, location.href);
+      url.searchParams.set("fmt", format);
+      try {
+        addDebugLog("tracks:fetch", { source, language, format, host: url.hostname, token: captionUrlRequiresPoToken(url) });
+        const body = await fetchCaptionText(url.toString());
+        const rows = parseCaptionBody(videoId, body, source).filter((cue) => cue.text && videoId && language);
+        addDebugLog("tracks:parsed", { source, language, format, body: body.length, rows: rows.length });
+        if (rows.length) return mergeAdjacentCues(rows);
+        const tokenHint = captionUrlRequiresPoToken(url) && !body.trim() ? " token-gated exp=xpe" : "";
+        failures.push(`${language}/${format}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`);
+      } catch (error) {
+        const tokenHint = captionUrlRequiresPoToken(url) ? " token-gated exp=xpe;" : "";
+        failures.push(`${language}/${format}:${tokenHint} ${toErrorMessage(error)}`);
+      }
     }
   }
 
@@ -3768,15 +3954,29 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
 
 async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: boolean } = {}) {
   addDebugLog("official:start", { videoId, includeSlowPaths: Boolean(options.includeSlowPaths) });
-  const snapshot = await readPlayerSnapshotViaBackground();
-  const playerResponse = snapshot?.playerResponse ?? parsePlayerResponseFromScripts() ?? await fetchPlayerResponseFromPage();
+  const [snapshot, fetchedPlayerResponse] = await Promise.all([
+    readPlayerSnapshotViaBackground(),
+    withTimeout(fetchPlayerResponseFromPage(), 1600, "watch html player response").catch((error) => {
+      addDebugLog("official:watch-html-timeout", { error: toErrorMessage(error) });
+      return undefined;
+    })
+  ]);
+  const scriptPlayerResponse = parsePlayerResponseFromScripts();
+  const playerResponses = [
+    snapshot?.playerResponse,
+    scriptPlayerResponse,
+    fetchedPlayerResponse
+  ].filter(Boolean) as PlayerResponse[];
+  const playerResponse = playerResponses.find((response) => tracksFromPlayerResponse(response).length) ?? playerResponses[0];
   const tracks = uniqueTracks([
     ...(snapshot?.captionTracks ?? []),
-    ...tracksFromPlayerResponse(playerResponse)
+    ...playerResponses.flatMap((response) => tracksFromPlayerResponse(response))
   ]);
   addDebugLog("official:snapshot", {
     snapshotTracks: snapshot?.captionTracks?.length ?? 0,
-    playerTracks: tracksFromPlayerResponse(playerResponse).length,
+    scriptTracks: tracksFromPlayerResponse(scriptPlayerResponse).length,
+    fetchedTracks: tracksFromPlayerResponse(fetchedPlayerResponse).length,
+    playerTracks: playerResponses.reduce((sum, response) => sum + tracksFromPlayerResponse(response).length, 0),
     mergedTracks: tracks.length,
     transcriptParams: snapshot?.transcriptParams?.length ?? 0
   });
@@ -3824,7 +4024,10 @@ async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: b
   }
 
   const youtubeiPlayerResponse = await readPlayerResponseViaYoutubei(videoId, snapshot);
-  const youtubeiTracks = uniqueTracks(tracksFromPlayerResponse(youtubeiPlayerResponse));
+  const youtubeiTracks = uniqueTracks([
+    ...tracks,
+    ...tracksFromPlayerResponse(youtubeiPlayerResponse)
+  ]);
   try {
     return await loadRowsFromTracks(videoId, youtubeiTracks, "official");
   } catch (error) {
@@ -4021,7 +4224,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
     runtime.__yllSafeIsLoadingOfficial = false;
     runtime.__yllSafeLoadingVideoId = undefined;
     addDebugLog("load:skip-ad", { videoId, force: Boolean(options.force), reason: options.reason ?? "poll" });
-    setStatus("广告播放中，暂停字幕读取，广告结束后自动恢复。");
+    setCaptionStatus("广告播放中，暂停字幕读取，广告结束后自动恢复。", "官方字幕轨道");
     scheduleOfficialRetry(2500, "ad-playing");
     return;
   }
@@ -4063,14 +4266,14 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
   if (!hasVisibleRows) {
     document.documentElement.classList.remove("yll-hide-native-captions");
   }
-  setStatus(`正在读取官方字幕轨道... 第 ${runtime.__yllSafeOfficialAttemptCount} 次`);
+  setCaptionStatus(`正在读取官方字幕轨道... 第 ${runtime.__yllSafeOfficialAttemptCount} 次`, "官方字幕轨道");
   await ensureTimedTextBridge().catch((error) => {
     runtime.__yllSafeLastFailure = `bridge: ${toErrorMessage(error)}`;
     runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
   });
 
   for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
-    setStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`);
+    setCaptionStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`, "官方字幕轨道");
     try {
       const includeSlowPaths = attempt > 0 || Boolean(options.force) || Boolean(hasVisibleRows && runtime.__yllSafeOfficialAttemptCount % 4 === 0);
       const attemptTimeoutMs = includeSlowPaths ? OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS : OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS;
@@ -4149,7 +4352,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
   ensureNativeCaptionsForFallback();
   const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
   addDebugLog("load:fallback-enabled", { debug });
-  setStatus(`官方字幕暂未读到，${Math.round(OFFICIAL_FALLBACK_RETRY_MS / 1000)} 秒后自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`);
+  setCaptionStatus(`官方字幕暂未读到，${Math.round(OFFICIAL_FALLBACK_RETRY_MS / 1000)} 秒后自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`, "页面字幕采集");
   scheduleOfficialRetry(3000, "fallback-enabled");
 }
 
@@ -4193,7 +4396,7 @@ function captureVisibleFallback() {
   }
   runtime.__yllSafeRows = [...rows, cue].slice(-MAX_VISIBLE_ROWS);
   renderRows(runtime.__yllSafeRows);
-  setStatus(`已临时采集 ${runtime.__yllSafeRows.length} 条页面字幕；原生 CC 已隐藏，仍建议优先使用官方字幕轨。`);
+  setCaptionStatus(`已临时采集 ${runtime.__yllSafeRows.length} 条页面字幕；原生 CC 已隐藏，仍建议优先使用官方字幕轨。`, "页面字幕采集");
   void translateRowsForCurrentVideo("页面字幕采集");
 }
 
@@ -4226,9 +4429,10 @@ function tick() {
       runtime.__yllSafeRowsGeneration = undefined;
       runtime.__yllSafeExpandedInsightKey = undefined;
       runtime.__yllSafeWasAdShowing = false;
+      closeLibraryPanel();
       document.getElementById(WORD_POPOVER_ID)?.remove();
-    document.getElementById(SETTINGS_PANEL_ID)?.remove();
-    document.getElementById(DEBUG_PANEL_ID)?.remove();
+      document.getElementById(SETTINGS_PANEL_ID)?.remove();
+      document.getElementById(DEBUG_PANEL_ID)?.remove();
       document.getElementById(PRACTICE_ID)?.remove();
       return;
     }
@@ -4264,7 +4468,6 @@ function tick() {
       document.getElementById(WORD_POPOVER_ID)?.remove();
       document.getElementById(SETTINGS_PANEL_ID)?.remove();
       document.getElementById(PRACTICE_ID)?.remove();
-      document.getElementById(LIBRARY_PANEL_ID)?.remove();
     }
     if (isYouTubeAdShowing()) {
       if (!runtime.__yllSafeWasAdShowing) {
@@ -4343,7 +4546,7 @@ window.addEventListener("yll-safe-reload", () => {
   document.getElementById(WORD_POPOVER_ID)?.remove();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(PRACTICE_ID)?.remove();
-  document.getElementById(LIBRARY_PANEL_ID)?.remove();
+  closeLibraryPanel();
   renderRows([]);
   setOverlayCue(undefined);
   start();

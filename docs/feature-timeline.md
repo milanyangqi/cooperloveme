@@ -379,6 +379,11 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 
+- Local `0.1.138` popup feature-card compacting:
+  - reduced the signed-in home feature cards from 72px to 54px minimum height, with tighter gaps, padding, and smaller label/count text
+  - local checks passed: `npm run build`, `git diff --check`
+  - pending extension reload and Chrome review
+
 ### 2026-06-03
 
 - Local `0.1.90` translation auto-retry recovery:

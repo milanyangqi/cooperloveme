@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.139";
+const SCRIPT_VERSION = "0.1.140";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -160,9 +160,9 @@ const TRANSLATION_RETRY_BACKOFF_MS = 15000;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 6000;
 const OFFICIAL_AUTO_ATTEMPTS = 6;
-const OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS = 2;
-const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 3500;
-const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 12000;
+const OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS = 1;
+const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 5500;
+const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 16000;
 const USER_SCROLL_PAUSE_MS = 4200;
 
 type SafeSettings = {
@@ -5064,8 +5064,13 @@ async function loadDirectTimedTextRows(videoId: string) {
   });
   const languageCandidates = Array.from(new Set(["en", "en-US", "en-GB", ...textTrackLanguages, ...listedTracks.map((track) => track.languageCode)]));
   const failures: string[] = [];
+  const listedCandidates = listedTracks.flatMap((track) => {
+    const withName = { languageCode: track.languageCode, kind: track.kind, name: track.name };
+    if (!track.name) return [withName];
+    return [withName, { languageCode: track.languageCode, kind: track.kind, name: undefined }];
+  });
   const directCandidates = [
-    ...listedTracks.map((track) => ({ languageCode: track.languageCode, kind: track.kind, name: track.name })),
+    ...listedCandidates,
     ...languageCandidates.flatMap((languageCode) => ([{ languageCode, kind: undefined, name: undefined }, { languageCode, kind: "asr", name: undefined }] as const))
   ];
   const seen = new Set<string>();

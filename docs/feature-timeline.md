@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 10:42:00 CST
+Last updated: 2026-06-07 10:52:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-07 10:18 CST | `0.1.138` adds `/api/timedtext?type=list` discovery so direct timedtext can use YouTube's actual `lang_code`, `kind`, and `name`, while fallback still displays early if official rows are late | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-07 10:52 CST | `0.1.140` extends the first official retry window, keeps visible fallback non-blocking after the first miss, and retries listed timedtext tracks both with and without YouTube's `name` parameter | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -393,6 +393,12 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - popup `字幕设置 / 打开面板` now dispatches a dedicated `yll-open-settings` event instead of only waking the caption reader
   - content script listens for `yll-open-settings`, mounts the subtitle panel if needed, and toggles the settings panel
   - rebuilt the floating subtitle settings panel with Relingo-style grouped rows for video subtitles, original/translation font size, opacity, sync calibration, and style preview
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.140` page-vocab UI and official caption retry tuning:
+  - compacted the page-vocab row action area into three fixed icon buttons so save, master, and save-sentence actions no longer wrap into the word text
+  - official caption loading now gives the first attempt more time, falls back visibly after one miss without blocking later official retries, and retries timedtext-list tracks both with and without the `name` parameter
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

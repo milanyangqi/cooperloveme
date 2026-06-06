@@ -173,49 +173,60 @@ export function PopupApp() {
       return;
     }
 
-    await chrome.scripting.executeScript({
+    const expectedVersion = chrome.runtime.getManifest().version;
+    const [probe] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => {
-        const page = window as Window & {
-          __yllSafeTimer?: number;
-          __yllSafeOverlayTimer?: number;
-          __yllSafeOfficialRetryTimer?: number;
-          __yllSafeStopCurrentScript?: () => void;
-          __yllSafeRows?: unknown[];
-          __yllSafeActiveKey?: string;
-          __yllSafeLoadedVideoId?: string;
-          __yllSafeLoadingVideoId?: string;
-          __yllSafeOfficialLockedVideoId?: string;
-        };
-        page.__yllSafeStopCurrentScript?.();
-        if (page.__yllSafeTimer) window.clearInterval(page.__yllSafeTimer);
-        page.__yllSafeTimer = undefined;
-        if (page.__yllSafeOverlayTimer) window.clearInterval(page.__yllSafeOverlayTimer);
-        page.__yllSafeOverlayTimer = undefined;
-        if (page.__yllSafeOfficialRetryTimer) window.clearTimeout(page.__yllSafeOfficialRetryTimer);
-        page.__yllSafeOfficialRetryTimer = undefined;
-        page.__yllSafeRows = [];
-        page.__yllSafeActiveKey = undefined;
-        page.__yllSafeLoadedVideoId = undefined;
-        page.__yllSafeLoadingVideoId = undefined;
-        page.__yllSafeOfficialLockedVideoId = undefined;
-        [
-          "yll-lab-panel-v2",
-          "yll-lab-overlay-v2",
-          "yll-lab-word-popover-v2",
-          "yll-lab-settings-v2",
-          "yll-lab-practice-v2",
-          "yll-lab-library-v2",
-          "yll-lab-debug-v2",
-          "yll-lab-style-v2"
-        ].forEach((id) => document.getElementById(id)?.remove());
-        document.documentElement.classList.remove("yll-hide-native-captions");
-      }
+      func: (version: string) => {
+        const page = window as Window & { __yllSafeScriptVersion?: string };
+        return page.__yllSafeScriptVersion === version;
+      },
+      args: [expectedVersion]
     });
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["assets/content.js"]
-    });
+
+    if (!probe?.result) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const page = window as Window & {
+            __yllSafeTimer?: number;
+            __yllSafeOverlayTimer?: number;
+            __yllSafeOfficialRetryTimer?: number;
+            __yllSafeRows?: unknown[];
+            __yllSafeActiveKey?: string;
+            __yllSafeLoadedVideoId?: string;
+            __yllSafeLoadingVideoId?: string;
+            __yllSafeOfficialLockedVideoId?: string;
+          };
+          if (page.__yllSafeTimer) window.clearInterval(page.__yllSafeTimer);
+          page.__yllSafeTimer = undefined;
+          if (page.__yllSafeOverlayTimer) window.clearInterval(page.__yllSafeOverlayTimer);
+          page.__yllSafeOverlayTimer = undefined;
+          if (page.__yllSafeOfficialRetryTimer) window.clearTimeout(page.__yllSafeOfficialRetryTimer);
+          page.__yllSafeOfficialRetryTimer = undefined;
+          page.__yllSafeRows = [];
+          page.__yllSafeActiveKey = undefined;
+          page.__yllSafeLoadedVideoId = undefined;
+          page.__yllSafeLoadingVideoId = undefined;
+          page.__yllSafeOfficialLockedVideoId = undefined;
+          [
+            "yll-lab-panel-v2",
+            "yll-lab-overlay-v2",
+            "yll-lab-word-popover-v2",
+            "yll-lab-settings-v2",
+            "yll-lab-practice-v2",
+            "yll-lab-library-v2",
+            "yll-lab-debug-v2",
+            "yll-lab-style-v2"
+          ].forEach((id) => document.getElementById(id)?.remove());
+          document.documentElement.classList.remove("yll-hide-native-captions");
+        }
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["assets/content.js"]
+      });
+    }
+
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => window.dispatchEvent(new Event("yll-safe-reload"))
@@ -618,8 +629,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.124 待审核</strong>
-              <p>插件图标改为页面内高容器，并修复账号加载和词本入口。</p>
+              <strong>0.1.125 待审核</strong>
+              <p>唤醒面板和重读字幕不再关闭页面内容器。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

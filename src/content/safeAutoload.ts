@@ -126,7 +126,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.124";
+const SCRIPT_VERSION = "0.1.125";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -280,7 +280,6 @@ function stopCurrentScriptInstance() {
   document.getElementById(PRACTICE_ID)?.remove();
   document.getElementById(DEBUG_PANEL_ID)?.remove();
   document.getElementById(LIBRARY_PANEL_ID)?.remove();
-  document.getElementById(POPUP_DOCK_ID)?.remove();
   document.getElementById(STYLE_ID)?.remove();
   document.documentElement.classList.remove("yll-hide-native-captions");
 }

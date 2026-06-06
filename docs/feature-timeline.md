@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 19:23:29 CST
+Last updated: 2026-06-06 19:39:13 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -38,7 +38,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Export / Anki / CSV | In Review | 2026-06-03 13:05 CST | `0.1.81` adds JSON, CSV, and Anki CSV exports inside the local library panel | Needs Chrome download review; advanced Pro export can be expanded later. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
-| Popup account login entry | In Review | 2026-06-06 19:23 CST | `0.1.124` moves extension-icon click to a page dock matching the subtitle panel height, caches account bootstrap fallback, and opens the in-page learning library from wordbook actions | Needs extension reload and popup review. |
+| Popup account login entry | In Review | 2026-06-06 19:39 CST | `0.1.125` keeps the page dock mounted when `唤醒面板` or `重读字幕` reloads the subtitle reader | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
 | Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
 | Stale content-script protection | In Review | 2026-06-06 13:45 CST | `0.1.115` injects on all `www.youtube.com/*` pages and lets the script self-activate on watch routes, covering YouTube SPA navigation | Needs extension reload and fresh YouTube page review. |
@@ -266,6 +266,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - the dock embeds the existing popup UI as an extension iframe, avoiding Chrome action-popup host height limits and outer mouse scrolling
   - account bootstrap now caches signed-in snapshots and falls back quickly when the remote account endpoint is slow, preventing the UI from getting stuck in `LOADING`
   - wordbook and library cards now open the in-page learning library panel before falling back to the options page
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and popup review
+
+- Local `0.1.125` dock-preserving subtitle reload:
+  - `唤醒面板` and `重读字幕` now probe the active page script version first and use the in-page reload event when the version already matches
+  - popup-triggered subtitle reload no longer calls the full content-script stop path that removes the page dock
+  - the content-script stop helper now preserves the page dock so future reader reloads do not close the container
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and popup review
 

@@ -78,6 +78,7 @@ type LibrarySentence = {
 
 type LibraryVocab = {
   id: string;
+  saved?: boolean;
   text?: string;
   normalizedText?: string;
   language?: string;
@@ -139,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.129";
+const SCRIPT_VERSION = "0.1.130";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -240,6 +241,8 @@ const runtime = window as typeof window & {
   __yllSafeLibraryBlurMeanings?: boolean;
   __yllSafeLibraryExpandedVocabId?: string;
   __yllSafeSelectedWordbookId?: string;
+  __yllSafeSignedIn?: boolean;
+  __yllSafeAuthCheckedAt?: number;
   __yllSafePanelDismissedVideoId?: string;
   __yllSafeWordLookupCache?: Map<string, string>;
   __yllSafeWordLookupPending?: Map<string, Promise<string | undefined>>;
@@ -893,6 +896,9 @@ function installStyle() {
       color: #f7f8f8;
       background: #2d3034;
       border: 1px solid rgba(255,255,255,.14);
+    }
+    #${PANEL_ID}:not(.yll-signed-in) [data-yll-auth-required] {
+      display: none;
     }
     #${STATUS_ID} {
       margin-top: 8px;
@@ -1692,7 +1698,11 @@ function mountPanel() {
   installStyle();
   const existing = document.getElementById(PANEL_ID);
   if (existing) {
-    if (existing.getAttribute("data-yll-version") === SCRIPT_VERSION) return existing;
+    if (existing.getAttribute("data-yll-version") === SCRIPT_VERSION) {
+      void refreshSignedInState();
+      ensureLibraryPanelVisible();
+      return existing;
+    }
     existing.remove();
   }
 
@@ -1713,9 +1723,9 @@ function mountPanel() {
         </div>
       </div>
       <div class="yll-toolbar">
-        <button class="yll-tool" type="button" data-yll-action="practice">练习当前句</button>
+        <button class="yll-tool" type="button" data-yll-action="practice" data-yll-auth-required>练习当前句</button>
         <button class="yll-tool secondary" type="button" data-yll-action="settings">字幕设置</button>
-        <button class="yll-tool secondary" type="button" data-yll-action="library">学习库</button>
+        <button class="yll-tool secondary" type="button" data-yll-action="library" data-yll-auth-required>学习库</button>
       </div>
       <div id="${STATUS_ID}">正在连接当前 YouTube 视频页...</div>
     </div>
@@ -1742,12 +1752,16 @@ function mountPanel() {
     toggleSettingsPanel();
   });
   panel.querySelector<HTMLButtonElement>('[data-yll-action="practice"]')?.addEventListener("click", () => {
-    openPracticeOverlay();
+    void requireSignedInFeature("练习当前句").then((allowed) => {
+      if (allowed) openPracticeOverlay();
+    });
   });
   panel.querySelector<HTMLButtonElement>('[data-yll-action="library"]')?.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void toggleLibraryPanel();
+    void requireSignedInFeature("学习库").then((allowed) => {
+      if (allowed) void toggleLibraryPanel();
+    });
   });
   panel.querySelector<HTMLElement>(".yll-title")?.addEventListener("click", (event) => {
     if (!event.altKey) return;
@@ -1757,8 +1771,31 @@ function mountPanel() {
   bindCaptionListScrollState(panel.querySelector<HTMLElement>(`#${LIST_ID}`));
   applySafeSettings();
   updateModeSelect();
+  void refreshSignedInState();
   ensureLibraryPanelVisible();
   return panel;
+}
+
+async function refreshSignedInState(force = false) {
+  if (!force && runtime.__yllSafeAuthCheckedAt && Date.now() - runtime.__yllSafeAuthCheckedAt < 8000) {
+    applySignedInClass();
+    return runtime.__yllSafeSignedIn;
+  }
+  runtime.__yllSafeAuthCheckedAt = Date.now();
+  const response = await sendRuntimeMessage<{ auth?: { status?: string } }>({ type: "GET_BOOTSTRAP" });
+  runtime.__yllSafeSignedIn = Boolean(response?.ok && response.data.auth?.status === "signed-in");
+  applySignedInClass();
+  return runtime.__yllSafeSignedIn;
+}
+
+function applySignedInClass() {
+  document.getElementById(PANEL_ID)?.classList.toggle("yll-signed-in", Boolean(runtime.__yllSafeSignedIn));
+}
+
+async function requireSignedInFeature(label: string) {
+  if (await refreshSignedInState()) return true;
+  setStatus(`${label} 需要先登录账号。请打开插件 popup 登录后再试。`);
+  return false;
 }
 
 function openPopupDock() {
@@ -1988,6 +2025,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
   const legacyWordbookId = (wordbooks.find((item) => item.name === "默认词本") ?? wordbooks[0])?.id ?? selectedWordbookId;
   runtime.__yllSafeSelectedWordbookId = selectedWordbookId || undefined;
   const wordbookVocabItems = vocabItems.filter((item) => (item.wordbookId ?? legacyWordbookId) === selectedWordbookId);
+  const pageVocabItems = currentPageVocabItems(runtime.__yllSafeRows ?? [], vocabItems, selectedWordbookId, legacyWordbookId);
   panel.innerHTML = `
     <div class="yll-library-head">
       <h3>本地学习库</h3>
@@ -2029,7 +2067,7 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       main: item.text ?? "",
       sub: item.translatedText ?? formatLibraryTime(item.createdAt)
     }))}
-    ${renderVocabLibrarySection(wordbookVocabItems)}
+    ${renderVocabLibrarySection(pageVocabItems)}
     ${renderLibrarySection("最近练习", practiceAttempts.slice(0, 6), (item) => ({
       main: `${practiceModeLabel(item.mode)} · ${Math.round(Number(item.score ?? 0))} 分`,
       sub: item.expected || formatLibraryTime(item.createdAt)
@@ -2144,6 +2182,30 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       }
     });
   });
+  panel.querySelectorAll<HTMLButtonElement>("[data-vocab-save]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.getAttribute("data-vocab-save");
+      const vocab = pageVocabItems.find((item) => item.id === id);
+      if (!vocab?.text) return;
+      button.disabled = true;
+      try {
+        const response = await sendRuntimeMessage<LibraryVocab>({
+          type: "UPSERT_VOCAB_MASTERY",
+          payload: vocabToUpsertPayload(vocab, selectedWordbookId || undefined, Number(vocab.mastery ?? 0) >= 5 ? 5 : 0)
+        });
+        if (!response?.ok) throw new Error(response?.error ?? "保存单词失败");
+        const updated = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
+        if (!updated?.ok) throw new Error(updated?.error ?? "刷新学习库失败");
+        renderLibraryPanel(panel, updated.data ?? {});
+        setStatus("已加入当前词本。");
+      } catch (error) {
+        button.disabled = false;
+        button.title = toErrorMessage(error);
+      }
+    });
+  });
   panel.querySelectorAll<HTMLButtonElement>("[data-vocab-mastery]").forEach((button) => {
     button.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -2151,9 +2213,16 @@ function renderLibraryPanel(panel: HTMLElement, library: LibrarySnapshot) {
       const id = button.getAttribute("data-vocab-mastery");
       const mastery = Number(button.getAttribute("data-next-mastery")) as 0 | 1 | 2 | 3 | 4 | 5;
       if (!id) return;
+      const vocab = pageVocabItems.find((item) => item.id === id);
+      if (!vocab?.text) return;
       button.disabled = true;
       try {
-        const response = await sendRuntimeMessage<LibraryVocab>({ type: "UPDATE_VOCAB_MASTERY", payload: { id, mastery } });
+        const response = vocab?.saved
+          ? await sendRuntimeMessage<LibraryVocab>({ type: "UPDATE_VOCAB_MASTERY", payload: { id, mastery } })
+          : await sendRuntimeMessage<LibraryVocab>({
+            type: "UPSERT_VOCAB_MASTERY",
+            payload: vocabToUpsertPayload(vocab, selectedWordbookId || undefined, mastery)
+          });
         if (!response?.ok) throw new Error(response?.error ?? "更新掌握状态失败");
         const updated = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
         if (!updated?.ok) throw new Error(updated?.error ?? "刷新学习库失败");
@@ -2474,6 +2543,65 @@ function renderVocabLibrarySection(items: LibraryVocab[]) {
   `;
 }
 
+function currentPageVocabItems(rows: LabCue[], libraryItems: LibraryVocab[], selectedWordbookId: string, legacyWordbookId: string) {
+  const currentWordbookItems = libraryItems.filter((item) => (item.wordbookId ?? legacyWordbookId) === selectedWordbookId);
+  const savedByText = new Map<string, LibraryVocab>();
+  [...libraryItems, ...currentWordbookItems].forEach((item) => {
+    const key = vocabTextKey(item.text ?? item.normalizedText ?? "");
+    if (!key) return;
+    const current = savedByText.get(key);
+    if (!current || (item.wordbookId ?? legacyWordbookId) === selectedWordbookId) {
+      savedByText.set(key, item);
+    }
+  });
+
+  const words = new Map<string, LibraryVocab>();
+  rows
+    .slice()
+    .sort((a, b) => a.startMs - b.startMs)
+    .forEach((cue) => {
+      Array.from(cleanText(cue.text).matchAll(/\b[A-Za-z][A-Za-z'-]*\b/g)).forEach((match) => {
+        const text = match[0].toLowerCase();
+        const key = vocabTextKey(text);
+        if (!key || words.has(key)) return;
+        const saved = savedByText.get(key);
+        words.set(key, {
+          id: saved?.id ?? `page:${Math.abs(hashString(key))}`,
+          saved: Boolean(saved),
+          text: saved?.text ?? text,
+          normalizedText: saved?.normalizedText ?? key,
+          language: saved?.language ?? "en",
+          wordbookId: saved?.wordbookId ?? selectedWordbookId,
+          meaning: saved?.meaning,
+          sourceSentence: saved?.sourceSentence ?? cue.text,
+          translatedSentence: saved?.translatedSentence ?? cue.translatedText,
+          videoId: saved?.videoId,
+          cueId: saved?.cueId,
+          mastery: saved?.mastery ?? 0,
+          createdAt: saved?.createdAt,
+          updatedAt: saved?.updatedAt
+        });
+      });
+    });
+  return Array.from(words.values());
+}
+
+function vocabTextKey(text: string) {
+  return normalizeForCompare(text).replace(/\s+/g, " ").trim();
+}
+
+function vocabToUpsertPayload(vocab: LibraryVocab, wordbookId: string | undefined, mastery: 0 | 1 | 2 | 3 | 4 | 5) {
+  return {
+    text: vocab.text ?? "",
+    language: vocab.language ?? "en",
+    wordbookId,
+    meaning: vocab.meaning,
+    sourceSentence: vocab.sourceSentence,
+    translatedSentence: vocab.translatedSentence,
+    mastery
+  };
+}
+
 function renderVocabManagerRow(item: LibraryVocab, blurMeanings: boolean) {
   const mastery = Math.max(0, Math.min(5, Number(item.mastery ?? 0)));
   const mastered = mastery >= 5;
@@ -2490,7 +2618,9 @@ function renderVocabManagerRow(item: LibraryVocab, blurMeanings: boolean) {
         </div>
         ${source ? `<div class="yll-vocab-source">${escapeHtml(source)}</div>` : ""}
       </div>
-      <button class="yll-vocab-icon is-on" type="button" title="移出词本" aria-label="移出词本" data-vocab-delete="${escapeHtml(item.id)}">♥</button>
+      ${item.saved
+        ? `<button class="yll-vocab-icon is-on" type="button" title="移出词本" aria-label="移出词本" data-vocab-delete="${escapeHtml(item.id)}">♥</button>`
+        : `<button class="yll-vocab-icon" type="button" title="加入词本" aria-label="加入词本" data-vocab-save="${escapeHtml(item.id)}">♡</button>`}
       <button class="yll-vocab-icon ${mastered ? "is-on" : ""}" type="button" title="${mastered ? "移回生词" : "标记掌握"}" aria-label="${mastered ? "移回生词" : "标记掌握"}" data-vocab-mastery="${escapeHtml(item.id)}" data-next-mastery="${mastered ? 0 : 5}">✓✓</button>
       <button class="yll-vocab-icon" type="button" title="查看详情" aria-label="查看详情" data-vocab-detail="${escapeHtml(item.id)}">›</button>
       ${expanded ? `
@@ -2499,7 +2629,9 @@ function renderVocabManagerRow(item: LibraryVocab, blurMeanings: boolean) {
           <div>释义：${escapeHtml(meaning)}</div>
           ${item.sourceSentence ? `<div>例句：${escapeHtml(item.sourceSentence)}</div>` : ""}
           ${item.translatedSentence ? `<div>译文：${escapeHtml(item.translatedSentence)}</div>` : ""}
-          <button class="yll-library-delete" type="button" data-vocab-delete="${escapeHtml(item.id)}">删除</button>
+          ${item.saved
+            ? `<button class="yll-library-delete" type="button" data-vocab-delete="${escapeHtml(item.id)}">删除</button>`
+            : `<button class="yll-library-delete" type="button" data-vocab-save="${escapeHtml(item.id)}">加入词本</button>`}
         </div>
       ` : ""}
       <span class="yll-vocab-progress" aria-hidden="true"></span>
@@ -5371,16 +5503,22 @@ function start() {
 window.addEventListener("yt-navigate-finish", () => window.setTimeout(start, 350));
 window.addEventListener("popstate", () => window.setTimeout(start, 350));
 window.addEventListener("yll-open-practice", () => {
-  if (!(runtime.__yllSafeRows ?? []).length) {
+  void requireSignedInFeature("练习当前句").then((allowed) => {
+    if (!allowed) return;
+    if (!(runtime.__yllSafeRows ?? []).length) {
     setStatus("正在读取字幕，稍后再打开练习模式。");
     void loadRowsForCurrentVideo().then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
     return;
-  }
-  openPracticeOverlay();
+    }
+    openPracticeOverlay();
+  });
 });
 window.addEventListener("yll-open-library", () => {
-  mountPanel();
-  void toggleLibraryPanel({ forceOpen: true });
+  void requireSignedInFeature("学习库").then((allowed) => {
+    if (!allowed) return;
+    mountPanel();
+    void toggleLibraryPanel({ forceOpen: true });
+  });
 });
 window.addEventListener("yll-open-popup-dock", () => {
   openPopupDock();

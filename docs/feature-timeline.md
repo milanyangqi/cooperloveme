@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 20:29:03 CST
+Last updated: 2026-06-06 21:38:14 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -34,7 +34,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
 | Comprehension quiz mode | In Review | 2026-06-03 13:05 CST | `0.1.81` saves quiz attempts to the local practice history after an option is selected | Needs generated questions and richer feedback. |
 | Sentence save / collection | In Review | 2026-06-04 17:49 CST | `0.1.94` restores per-row practice and save actions in the right-side caption list | Needs extension reload and Chrome review. |
-| Vocabulary library | In Review | 2026-06-06 20:29 CST | `0.1.129` changes wordbook vocabulary into peer-style new/mastered tabs with blur-meaning practice and row actions | Needs extension reload and Chrome review. |
+| Vocabulary library | In Review | 2026-06-06 21:38 CST | `0.1.130` makes `本页生词` come from the current subtitle page's deduped words and gates practice/library entries behind signed-in auth | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
@@ -303,6 +303,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - replaced the plain current-wordbook vocab list with peer-style `本页生词` / `已掌握` tabs
   - added a `模糊本页生词释义` toggle, orange mastery progress lines, saved-heart removal, mastered toggle, and detail expansion per word
   - added `UPDATE_VOCAB_MASTERY` so marking a word mastered or moving it back to new words persists in IndexedDB
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.130` page-word source and signed-in gates:
+  - `本页生词` now derives from the current video subtitle rows, deduplicates English words, and excludes words whose persisted mastery is already complete
+  - clicking the mastered action upserts unsaved page words into the selected wordbook and moves them into `已掌握`; moving back persists mastery `0`
+  - the right-panel `练习当前句` and `学习库` toolbar entries are hidden unless `GET_BOOTSTRAP.auth.status` is `signed-in`, with event-level guards for popup-triggered opens
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

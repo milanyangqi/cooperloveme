@@ -216,6 +216,9 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
     case "UPDATE_VOCAB_MASTERY":
       return updateVocabMastery(localUser.id, message.payload.id, message.payload.mastery);
 
+    case "UPSERT_VOCAB_MASTERY":
+      return upsertVocabMastery(localUser.id, message.payload);
+
     case "SAVE_SENTENCE": {
       const now = new Date().toISOString();
       const note: SentenceNote = {
@@ -811,6 +814,47 @@ async function updateVocabMastery(userId: string, id: string, mastery: VocabItem
     syncStatus: "local-only"
   };
   return putRecord("vocabItems", updated);
+}
+
+async function upsertVocabMastery(
+  userId: string,
+  draft: {
+    text: string;
+    language?: string;
+    wordbookId?: string;
+    meaning?: string;
+    sourceSentence?: string;
+    translatedSentence?: string;
+    mastery: VocabItem["mastery"];
+  }
+): Promise<VocabItem> {
+  const text = draft.text.trim();
+  if (!text) throw new Error("单词不能为空。");
+  const defaultWordbook = draft.wordbookId ? undefined : await ensureDefaultWordbook(userId);
+  const wordbookId = draft.wordbookId ?? defaultWordbook?.id;
+  const normalizedText = normalizeText(text);
+  const existing = (await listByUser<VocabItem>("vocabItems", userId))
+    .find((item) => (item.wordbookId ?? defaultWordbook?.id) === wordbookId && item.normalizedText === normalizedText);
+  const now = new Date().toISOString();
+  const item: VocabItem = {
+    ...(existing ?? {
+      id: createId("vocab"),
+      userId,
+      text,
+      normalizedText,
+      language: draft.language || "en",
+      createdAt: now
+    }),
+    text,
+    wordbookId,
+    meaning: draft.meaning ?? existing?.meaning,
+    sourceSentence: draft.sourceSentence ?? existing?.sourceSentence,
+    translatedSentence: draft.translatedSentence ?? existing?.translatedSentence,
+    mastery: draft.mastery,
+    updatedAt: now,
+    syncStatus: "local-only"
+  };
+  return putRecord("vocabItems", item);
 }
 
 async function guardQuota(userId: string, feature: UsageFeature, cost: number): Promise<void> {

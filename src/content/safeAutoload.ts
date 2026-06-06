@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.132";
+const SCRIPT_VERSION = "0.1.133";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -839,7 +839,7 @@ function installStyle() {
     #${PANEL_ID} * { box-sizing: border-box; }
     #${PANEL_ID} .yll-head {
       flex: 0 0 auto;
-      min-height: 128px;
+      min-height: 74px;
       padding: 12px;
       border-bottom: 1px solid rgba(255,255,255,.12);
       background: #202224;
@@ -876,29 +876,6 @@ function installStyle() {
       border: 1px solid rgba(255,255,255,.14);
       border-radius: 6px;
       cursor: pointer;
-    }
-    #${PANEL_ID} .yll-toolbar {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-top: 8px;
-    }
-    #${PANEL_ID} .yll-tool {
-      height: 30px;
-      color: #121212;
-      background: #ffc857;
-      border: 0;
-      border-radius: 6px;
-      font-weight: 750;
-      cursor: pointer;
-    }
-    #${PANEL_ID} .yll-tool.secondary {
-      color: #f7f8f8;
-      background: #2d3034;
-      border: 1px solid rgba(255,255,255,.14);
-    }
-    #${PANEL_ID}:not(.yll-signed-in) [data-yll-auth-required] {
-      display: none;
     }
     #${STATUS_ID} {
       margin-top: 8px;
@@ -965,35 +942,6 @@ function installStyle() {
       overflow-wrap: anywhere;
     }
     #${LIST_ID}.hide-translations .yll-translation { display: none; }
-    #${LIST_ID} .yll-row-actions {
-      display: none;
-      flex-direction: row;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-      margin-top: 7px;
-    }
-    #${LIST_ID} .yll-row:hover .yll-row-actions,
-    #${LIST_ID} .yll-row:focus-within .yll-row-actions {
-      display: flex;
-    }
-    #${LIST_ID} .yll-row-action {
-      min-height: 24px;
-      padding: 0 9px;
-      color: #f7f8f8;
-      background: #2d3034;
-      border: 1px solid rgba(255,255,255,.14);
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 750;
-      cursor: pointer;
-    }
-    #${LIST_ID} .yll-row-action:hover,
-    #${LIST_ID} .yll-row-action:focus {
-      color: #111;
-      background: #ffc857;
-      outline: none;
-    }
     #${LIST_ID} .yll-empty-state {
       margin: 18px 14px;
       padding: 14px;
@@ -1010,29 +958,6 @@ function installStyle() {
       color: #f7f8f8;
       font-size: 14px;
     }
-    #${LIST_ID} .yll-row-insight {
-      grid-column: 2 / 3;
-      margin-top: 8px;
-      padding: 10px;
-      color: #d7dbe1;
-      background: rgba(0,0,0,.24);
-      border: 1px solid rgba(255,255,255,.12);
-      border-radius: 7px;
-      font-size: 12px;
-      line-height: 1.48;
-    }
-    #${LIST_ID} .yll-row-insight strong {
-      display: block;
-      margin: 8px 0 3px;
-      color: #ffc857;
-      font-size: 12px;
-    }
-    #${LIST_ID} .yll-row-insight strong:first-child { margin-top: 0; }
-    #${LIST_ID} .yll-row-insight ul {
-      margin: 0;
-      padding-left: 16px;
-    }
-    #${LIST_ID} .yll-row-insight li { margin: 2px 0; }
     #${LIST_ID} .yll-word {
       border-radius: 3px;
       cursor: help;
@@ -1722,11 +1647,6 @@ function mountPanel() {
           <button class="yll-close" type="button">关闭</button>
         </div>
       </div>
-      <div class="yll-toolbar">
-        <button class="yll-tool" type="button" data-yll-action="practice" data-yll-auth-required>练习当前句</button>
-        <button class="yll-tool secondary" type="button" data-yll-action="settings">字幕设置</button>
-        <button class="yll-tool secondary" type="button" data-yll-action="library" data-yll-auth-required>学习库</button>
-      </div>
       <div id="${STATUS_ID}">正在连接当前 YouTube 视频页...</div>
     </div>
     <div id="${LIST_ID}"></div>
@@ -1747,21 +1667,6 @@ function mountPanel() {
     const subtitleMode = parseSubtitleMode(select.value);
     saveSafeSettings({ ...settings, subtitleMode });
     addDebugLog("subtitle-mode-change", { subtitleMode, version: SCRIPT_VERSION });
-  });
-  panel.querySelector<HTMLButtonElement>('[data-yll-action="settings"]')?.addEventListener("click", () => {
-    toggleSettingsPanel();
-  });
-  panel.querySelector<HTMLButtonElement>('[data-yll-action="practice"]')?.addEventListener("click", () => {
-    void requireSignedInFeature("练习当前句").then((allowed) => {
-      if (allowed) openPracticeOverlay();
-    });
-  });
-  panel.querySelector<HTMLButtonElement>('[data-yll-action="library"]')?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    void requireSignedInFeature("学习库").then((allowed) => {
-      if (allowed) void toggleLibraryPanel();
-    });
   });
   panel.querySelector<HTMLElement>(".yll-title")?.addEventListener("click", (event) => {
     if (!event.altKey) return;
@@ -3475,20 +3380,13 @@ function renderRows(rows: LabCue[]) {
     .map((cue) => {
       const key = cueKey(cue);
       const activeClass = key === runtime.__yllSafeActiveKey ? " is-active" : "";
-      const expanded = key === runtime.__yllSafeExpandedInsightKey;
       return `
         <div class="yll-row${activeClass}" role="button" tabindex="0" data-start="${cue.startMs}" data-key="${escapeHtml(key)}">
           <span class="yll-time">${formatClock(cue.startMs)}</span>
           <span>
             <span class="yll-text">${renderClickableText(cue.text)}</span>
             ${cue.translatedText ? `<span class="yll-translation">${escapeHtml(cue.translatedText)}</span>` : ""}
-            <span class="yll-row-actions" aria-label="句子操作">
-              <button class="yll-row-action" type="button" data-row-action="practice">练习</button>
-              <button class="yll-row-action" type="button" data-row-action="save">收藏</button>
-              <button class="yll-row-action" type="button" data-row-action="explain">${expanded ? "收起" : "讲解"}</button>
-            </span>
           </span>
-          ${expanded ? `<div class="yll-row-insight">${renderSentenceInsightHtml(cue, "row")}</div>` : ""}
         </div>
       `;
     })
@@ -3503,33 +3401,6 @@ function renderRows(rows: LabCue[]) {
     };
     button.addEventListener("click", (event) => {
       const target = event.target as HTMLElement | null;
-      const rowAction = target?.closest<HTMLButtonElement>("[data-row-action]");
-      if (rowAction) {
-        event.preventDefault();
-        event.stopPropagation();
-        const rowCue = sorted.find((cue) => cueKey(cue) === button.dataset.key);
-        if (!rowCue) return;
-        if (rowAction.dataset.rowAction === "practice") {
-          openPracticeOverlay([rowCue], 0);
-          return;
-        }
-        if (rowAction.dataset.rowAction === "save") {
-          rowAction.disabled = true;
-          rowAction.textContent = "保存中";
-          void saveSentenceNote(rowCue).then((saved) => {
-            rowAction.textContent = saved ? "已收藏" : "失败";
-            rowAction.disabled = false;
-          });
-          return;
-        }
-        if (rowAction.dataset.rowAction === "explain") {
-          const rowKey = cueKey(rowCue);
-          runtime.__yllSafeExpandedInsightKey = runtime.__yllSafeExpandedInsightKey === rowKey ? undefined : rowKey;
-          document.getElementById(WORD_POPOVER_ID)?.setAttribute("hidden", "");
-          renderRows(runtime.__yllSafeRows ?? []);
-          return;
-        }
-      }
       const wordElement = target?.closest<HTMLElement>(".yll-word");
       if (wordElement?.dataset.word) {
         event.preventDefault();

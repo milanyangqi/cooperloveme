@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 21:59:00 CST
+Last updated: 2026-06-06 22:09:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -21,7 +21,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Official YouTube caption loading | In Review | 2026-06-06 21:48 CST | `0.1.131` tries video textTracks and direct timedtext before slower caption-track paths, and records direct timedtext failures | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
-| Right-side caption panel with full sentences | In Review | 2026-06-05 08:27 CST | `0.1.110` changes the header to auto height so toolbar tabs such as `学习库` are not covered by the subtitle list | Needs Chrome review after extension reload. |
+| Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
 | Right-side newest-on-top / upward scroll behavior | In Review | 2026-06-04 12:57 CST | `0.1.93` renders rows in chronological order and scrolls the active row into the lower part of the taller panel so playback moves upward | Needs extension reload and Chrome review on long videos. |
 | Adjacent duplicate caption filtering | In Review | 2026-06-02 14:49 CST | `0.1.60` adds wider fallback similarity filtering | Needs more fallback-video review because current Chrome test used official captions. |
 | Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
@@ -325,6 +325,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - popup `本页生词` now reads all deduped words from the active YouTube page's current subtitle rows instead of showing only saved vocabulary
   - page words merge with local saved/mastery state so `掌握` persists mastery `5` and moves the word to `已掌握`, while `生词` upserts the word into the default wordbook with mastery `0`
   - the popup vocabulary preview has an internal scroll area for long videos with hundreds of words, keeping the outer popup height stable
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.133` subtitle-panel simplification:
+  - removed `练习当前句`, `字幕设置`, and `学习库` toolbar buttons from the right-side YouTube subtitle panel
+  - removed hover row actions for practice, sentence collection, and inline explanation so the panel displays subtitle rows only
+  - popup and docked popup still own the learning/practice/settings entry points
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

@@ -744,8 +744,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.132 待审核</strong>
-              <p>本页生词读取当前视频全部去重单词，并支持生词库/已掌握切换。</p>
+              <strong>0.1.133 待审核</strong>
+              <p>右侧面板回归纯字幕显示，学习与练习入口移到 popup 设置页。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

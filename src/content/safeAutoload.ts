@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.130";
+const SCRIPT_VERSION = "0.1.131";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -4039,11 +4039,20 @@ async function loadRowsViaPlayerRequest(videoId: string, tracks: RawCaptionTrack
 }
 
 async function sendRuntimeMessage<T>(message: { type: string; payload?: unknown }) {
-  if (!chrome?.runtime?.sendMessage) return undefined;
   return new Promise<RuntimeResponse<T> | undefined>((resolve) => {
     try {
-      chrome.runtime.sendMessage(message, (response: RuntimeResponse<T> | undefined) => {
-        const errorMessage = chrome.runtime.lastError?.message;
+      const sendMessage = chrome?.runtime?.sendMessage?.bind(chrome.runtime);
+      if (!sendMessage) {
+        resolve(undefined);
+        return;
+      }
+      sendMessage(message, (response: RuntimeResponse<T> | undefined) => {
+        let errorMessage = "";
+        try {
+          errorMessage = chrome.runtime.lastError?.message ?? "";
+        } catch (error) {
+          errorMessage = toErrorMessage(error);
+        }
         if (errorMessage) {
           if (isExtensionContextInvalidated(errorMessage)) handleInvalidatedExtensionContext();
           resolve({ ok: false, error: errorMessage });
@@ -4934,6 +4943,29 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
 
 async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: boolean } = {}) {
   addDebugLog("official:start", { videoId, includeSlowPaths: Boolean(options.includeSlowPaths) });
+  try {
+    const textTrackRows = readTextTrackRows();
+    if (isLikelyCompleteTextTrackRows(textTrackRows)) {
+      addDebugLog("official:text-track-early-success", { rows: textTrackRows.length });
+      return textTrackRows;
+    }
+    if (textTrackRows.length) {
+      addDebugLog("official:text-track-early-partial", { rows: textTrackRows.length });
+    }
+  } catch (error) {
+    runtime.__yllSafeLastFailure = `textTracks early: ${toErrorMessage(error)}`;
+  }
+
+  try {
+    const directRows = await loadDirectTimedTextRows(videoId);
+    if (directRows.length) {
+      addDebugLog("official:direct-timedtext-early-success", { rows: directRows.length });
+      return directRows;
+    }
+  } catch (error) {
+    runtime.__yllSafeLastFailure = `timedtext early: ${toErrorMessage(error)}`;
+  }
+
   const [snapshot, fetchedPlayerResponse] = await Promise.all([
     readPlayerSnapshotViaBackground(),
     withTimeout(fetchPlayerResponseFromPage(), 1600, "watch html player response").catch((error) => {
@@ -5071,7 +5103,11 @@ function json3WordTimings(startMs: number, durationMs: number, segs: Array<{ utf
 }
 
 async function loadDirectTimedTextRows(videoId: string) {
-  const languageCandidates = ["en", "en-US"];
+  const textTrackLanguages = Array.from(getMainVideo()?.textTracks ?? [])
+    .map((track) => track.language)
+    .filter((language) => language && language.startsWith("en"));
+  const languageCandidates = Array.from(new Set(["en", "en-US", "en-GB", ...textTrackLanguages]));
+  const failures: string[] = [];
   for (const languageCode of languageCandidates) {
     for (const kind of [undefined, "asr"] as const) {
       const url = new URL("https://www.youtube.com/api/timedtext");
@@ -5082,14 +5118,20 @@ async function loadDirectTimedTextRows(videoId: string) {
 
       try {
         const text = await fetchCaptionText(url.toString());
-        if (!text.trim()) continue;
+        if (!text.trim()) {
+          failures.push(`${languageCode}/${kind ?? "manual"}:empty`);
+          continue;
+        }
         const rows = parseCaptionBody(videoId, text, "timedtext");
         if (rows.length) return mergeAdjacentCues(rows);
-      } catch {
+        failures.push(`${languageCode}/${kind ?? "manual"}:parsed=0 body=${text.length}`);
+      } catch (error) {
+        failures.push(`${languageCode}/${kind ?? "manual"}:${toErrorMessage(error).slice(0, 120)}`);
         continue;
       }
     }
   }
+  addDebugLog("direct-timedtext:failed", { failures: failures.slice(0, 6) });
   return [];
 }
 
@@ -5268,6 +5310,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
         const sourceLabel =
           officialRows.some((row) => row.source === "transcript-panel") ? "YouTube Transcript 面板" :
             officialRows.some((row) => row.source === "transcript") ? "YouTube transcript" :
+              officialRows.some((row) => row.source === "timedtext") ? "YouTube timedtext" :
               "官方字幕轨道";
         saveRows(officialRows, sourceLabel);
         runtime.__yllSafeIsLoadingOfficial = false;

@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 21:38:14 CST
+Last updated: 2026-06-06 21:48:20 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-06 11:16 CST | `0.1.113` reads background snapshot and watch-page player response in parallel, then merges all discovered caption tracks | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-06 21:48 CST | `0.1.131` tries video textTracks and direct timedtext before slower caption-track paths, and records direct timedtext failures | Needs Chrome timing review on fresh page load without clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-05 08:27 CST | `0.1.110` changes the header to auto height so toolbar tabs such as `学习库` are not covered by the subtitle list | Needs Chrome review after extension reload. |
@@ -41,7 +41,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Popup account login entry | In Review | 2026-06-06 19:57 CST | `0.1.126` keeps stale invalidated content scripts from refreshing overlays after extension reload | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
 | Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
-| Stale content-script protection | In Review | 2026-06-06 13:45 CST | `0.1.115` injects on all `www.youtube.com/*` pages and lets the script self-activate on watch routes, covering YouTube SPA navigation | Needs extension reload and fresh YouTube page review. |
+| Stale content-script protection | In Review | 2026-06-06 21:48 CST | `0.1.131` wraps all runtime message access, including `lastError`, so invalidated contexts are handled instead of leaking as uncaught errors | Needs extension reload and fresh YouTube page review. |
 
 ## Timeline
 
@@ -310,6 +310,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - `本页生词` now derives from the current video subtitle rows, deduplicates English words, and excludes words whose persisted mastery is already complete
   - clicking the mastered action upserts unsaved page words into the selected wordbook and moves them into `已掌握`; moving back persists mastery `0`
   - the right-panel `练习当前句` and `学习库` toolbar entries are hidden unless `GET_BOOTSTRAP.auth.status` is `signed-in`, with event-level guards for popup-triggered opens
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.131` runtime invalidation and official-caption priority:
+  - wrapped `chrome.runtime.sendMessage` and `chrome.runtime.lastError` access so invalidated extension contexts resolve into handled status instead of uncaught page errors
+  - moved complete `video.textTracks` and direct `/api/timedtext` attempts ahead of slower caption-track/transcript paths
+  - expanded direct timedtext language candidates and logs failed direct attempts for easier diagnosis
+  - background caption fetch now returns content type so the content script can distinguish empty/HTML responses from usable caption bodies
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

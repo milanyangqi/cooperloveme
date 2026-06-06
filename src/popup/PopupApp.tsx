@@ -630,8 +630,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.130 待审核</strong>
-              <p>本页生词来自当前字幕页面去重词表，练习和学习库登录后显示。</p>
+              <strong>0.1.131 待审核</strong>
+              <p>修复过期上下文报错，并提前尝试 timedtext 官方字幕。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

@@ -450,7 +450,7 @@ async function fetchYoutubeiTranscript(payload: {
   return response.json();
 }
 
-async function fetchCaptionText(url: string): Promise<{ body: string; finalUrl: string; status: number }> {
+async function fetchCaptionText(url: string): Promise<{ body: string; finalUrl: string; status: number; contentType: string }> {
   const parsed = new URL(url);
   const allowed =
     parsed.protocol === "https:" &&
@@ -474,7 +474,8 @@ async function fetchCaptionText(url: string): Promise<{ body: string; finalUrl: 
   return {
     body: await response.text(),
     finalUrl: response.url,
-    status: response.status
+    status: response.status,
+    contentType: response.headers.get("content-type") ?? ""
   };
 }
 

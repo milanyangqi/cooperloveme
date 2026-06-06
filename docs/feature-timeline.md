@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 11:05:00 CST
+Last updated: 2026-06-07 11:28:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-07 11:05 CST | `0.1.141` prioritizes playerResponse captionTracks before guessed timedtext URLs so official baseUrl tracks are not starved by slow fallback attempts | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-07 11:28 CST | `0.1.142` expands live player probing and tries official caption baseUrl unchanged before forced json3/srv3/vtt formats | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -36,7 +36,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Sentence save / collection | In Review | 2026-06-07 10:18 CST | `0.1.138` adds `收藏该句` on page-vocab rows so a word's source subtitle sentence can be collected directly | Needs extension reload and Chrome review. |
 | Vocabulary library | In Review | 2026-06-07 11:05 CST | `0.1.141` turns the learning-library summary blocks into selectable 生词 / 已掌握 / 收藏句 filters while preserving wordbook create/export/delete controls | Needs extension reload and Chrome review. |
 | Export / Anki / CSV | In Review | 2026-06-06 19:57 CST | `0.1.126` adds wordbook-aware CSV export plus vocab CSV/JSON import into the selected wordbook | Needs Chrome download/import review. |
-| Cloud sync | In Review | 2026-06-07 11:05 CST | `0.1.141` defaults settings and new entitlement snapshots to cloud sync enabled, with a schema migration for older stored settings | Needs extension reload and signed-in manual sync review. |
+| Cloud sync | In Review | 2026-06-07 11:28 CST | `0.1.142` adds a Supabase-to-local pull action beside upload sync and keeps sync enabled by default | Needs extension reload and signed-in manual sync review. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
 | Popup account login entry | In Review | 2026-06-06 19:57 CST | `0.1.126` keeps stale invalidated content scripts from refreshing overlays after extension reload | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
@@ -407,6 +407,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - changed cloud sync defaults to enabled and migrates pre-`schemaVersion: 2` stored settings to sync enabled
   - popup `字幕设置 / 打开面板` now calls the content script's direct open-settings function before falling back to the window event path
   - official caption loading now reads playerResponse captionTracks before trying guessed direct timedtext URLs, preventing fallback attempts from consuming the first official retry window
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.142` slider, cloud pull, compact cards, and official track recovery:
+  - subtitle settings sliders now update the visible value and overlay preview while dragging, then persist on change instead of re-rendering the panel on every input event
+  - added `PULL_LIBRARY` and popup buttons for pulling Supabase learning data back into local IndexedDB
+  - reduced signed-in home feature cards from 54px to 42px minimum height with tighter spacing
+  - official caption loading now probes more YouTube player candidates and tries caption `baseUrl` as-is before mutating `fmt`
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

@@ -219,6 +219,12 @@ async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.Mes
       return result;
     }
 
+    case "PULL_LIBRARY": {
+      const result = await pullLearningData(localUser.id);
+      notifyLibraryChanged();
+      return result;
+    }
+
     case "CREATE_WORDBOOK":
       return createWordbook(localUser.id, message.payload.name, message.payload.description);
 
@@ -727,13 +733,18 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
         ytcfg?: { get?: (key: string) => unknown };
         ytplayer?: { config?: { args?: { raw_player_response?: unknown; player_response?: unknown } } };
       };
-      const player = document.getElementById("movie_player") as
-        | (HTMLElement & {
-            getPlayerResponse?: () => unknown;
-            getVideoData?: () => unknown;
-            getOption?: (section: string, key: string) => unknown;
-          })
-        | null;
+      type YouTubePlayerElement = HTMLElement & {
+        getPlayerResponse?: () => unknown;
+        getVideoData?: () => unknown;
+        getOption?: (section: string, key: string) => unknown;
+        player_?: YouTubePlayerElement;
+      };
+      const playerCandidates = [
+        document.getElementById("movie_player"),
+        document.querySelector(".html5-video-player"),
+        (document.querySelector("ytd-player") as YouTubePlayerElement | null)?.player_
+      ].filter(Boolean) as YouTubePlayerElement[];
+      const player = playerCandidates.find((candidate) => typeof candidate.getPlayerResponse === "function" || typeof candidate.getOption === "function") ?? playerCandidates[0] ?? null;
 
       const playerResponse =
         safe(() => player?.getPlayerResponse?.()) ??
@@ -743,7 +754,8 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
       const videoData = safe(() => player?.getVideoData?.());
       const tracklist =
         safe(() => player?.getOption?.("captions", "tracklist")) ??
-        safe(() => player?.getOption?.("captions", "captionTracks"));
+        safe(() => player?.getOption?.("captions", "captionTracks")) ??
+        safe(() => player?.getOption?.("captions", "playerCaptionsTracklistRenderer"));
 
       const captionTracks = [
         ...extractCaptionTracks(tracklist),
@@ -1071,6 +1083,54 @@ async function syncLearningData(userId: string): Promise<{ synced: number; faile
   return { synced, failed };
 }
 
+async function pullLearningData(userId: string): Promise<{ pulled: number; failed: number }> {
+  const settings = await loadSettings();
+  if (!settings.syncEnabled) throw new Error("请先在设置中开启云同步。");
+  const session = await getSupabaseDataSession();
+  if (!session) throw new Error("请先登录 Supabase 账号。");
+
+  let pulled = 0;
+  let failed = 0;
+  const remoteUserId = userIdFromAccessToken(session.accessToken);
+
+  const pullBatch = async <T extends SyncableRecord>(storeName: SyncableStoreName) => {
+    try {
+      const rows = await fetchRemoteRows(remoteTableForStore(storeName), session.accessToken, remoteUserId);
+      const records = rows
+        .map((row) => restoreRemotePayload<T>(row, userId))
+        .filter((record): record is T => Boolean(record));
+      await Promise.all(records.map((record) => putRecord(storeName, record)));
+      pulled += records.length;
+    } catch {
+      failed += 1;
+    }
+  };
+
+  await pullBatch<Wordbook>("wordbooks");
+  await pullBatch<VocabItem>("vocabItems");
+  await pullBatch<SentenceNote>("sentenceNotes");
+  await pullBatch<PracticeAttempt>("practiceAttempts");
+
+  try {
+    const rows = await fetchRemoteRows("yll_settings", session.accessToken, remoteUserId, "local_id=eq.settings");
+    const remoteSettings = rows
+      .map((row) => {
+        const payload = row.payload as { settings?: ExtensionSettings } | undefined;
+        return payload?.settings ?? row.settings;
+      })
+      .find((value): value is ExtensionSettings => Boolean(value && typeof value === "object"));
+    if (remoteSettings) {
+      await saveSettings({ ...remoteSettings, syncEnabled: true });
+      pulled += 1;
+    }
+  } catch {
+    failed += 1;
+  }
+
+  if (failed) throw new Error(`Supabase 拉取失败：已恢复 ${pulled} 条，${failed} 个数据表失败。`);
+  return { pulled, failed };
+}
+
 async function syncSettingsIfEnabled(settings: ExtensionSettings): Promise<void> {
   if (!settings.syncEnabled) return;
   try {
@@ -1089,6 +1149,31 @@ async function syncRecordIfEnabled(storeName: SyncableStoreName, record: Syncabl
   } catch {
     // Keep local-first writes usable. Manual "立即同步" reports aggregate failures.
   }
+}
+
+async function fetchRemoteRows(table: string, accessToken: string, userId: string, extraQuery = ""): Promise<Array<Record<string, unknown>>> {
+  const query = [`user_id=eq.${encodeURIComponent(userId)}`, "select=*"];
+  if (extraQuery) query.push(extraQuery);
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query.join("&")}`, {
+    headers: supabaseRestHeaders(accessToken)
+  });
+  if (!response.ok) throw new Error(await readRestError(response));
+  return (await response.json().catch(() => [])) as Array<Record<string, unknown>>;
+}
+
+function restoreRemotePayload<T extends SyncableRecord>(row: Record<string, unknown>, userId: string): T | undefined {
+  const payload = row.payload;
+  if (!payload || typeof payload !== "object") return undefined;
+  const record = payload as Partial<T> & { id?: string; local_id?: string; userId?: string; syncStatus?: string; updatedAt?: string };
+  const id = record.id ?? (typeof row.local_id === "string" ? row.local_id : undefined);
+  if (!id) return undefined;
+  return {
+    ...record,
+    id,
+    userId,
+    syncStatus: "synced",
+    updatedAt: record.updatedAt ?? new Date().toISOString()
+  } as T;
 }
 
 async function deleteRemoteRecordIfEnabled(table: string, localId: string): Promise<void> {

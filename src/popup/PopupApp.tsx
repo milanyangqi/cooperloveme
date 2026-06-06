@@ -592,6 +592,25 @@ export function PopupApp() {
     await reloadBootstrap();
   };
 
+  const pullLibrary = async () => {
+    const confirmed = window.confirm("确认从 Supabase 拉取学习数据到本地？同 ID 的本地记录会被云端记录更新。");
+    if (!confirmed) {
+      setStatus("已取消从 Supabase 拉取。");
+      return;
+    }
+    setStatus("正在从 Supabase 拉取学习数据...");
+    const response = await sendRuntimeMessage<{ pulled: number; failed: number }>({ type: "PULL_LIBRARY" });
+    if (!response.ok) {
+      setStatus(response.error);
+      window.alert(response.error);
+      return;
+    }
+    const message = response.data.failed ? `拉取完成：${response.data.pulled} 条成功，${response.data.failed} 个表失败。` : `已从 Supabase 拉取 ${response.data.pulled} 条学习数据。`;
+    setStatus(message);
+    window.alert(message);
+    await reloadBootstrap();
+  };
+
   const refreshPageWords = async () => {
     const response = await sendRuntimeMessage<PageWordPayload>({ type: "READ_ACTIVE_PAGE_WORDS" });
     if (!response.ok) return;
@@ -964,8 +983,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.141 待审核</strong>
-              <p>修复学习库筛选、字幕设置面板和官方字幕优先读取。</p>
+              <strong>0.1.142 待审核</strong>
+              <p>优化滑杆、云端拉取、功能卡和官方字幕轨道读取。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -1168,6 +1187,12 @@ export function PopupApp() {
                   />
                   <ActionSetting
                     icon={<Download size={17} />}
+                    label="从 Supabase 同步到本地"
+                    value="拉取云端数据"
+                    onClick={pullLibrary}
+                  />
+                  <ActionSetting
+                    icon={<Download size={17} />}
                     label="导出数据"
                     value={`${sentenceCount} 句 / ${vocabCount} 词`}
                     onClick={exportData}
@@ -1212,6 +1237,7 @@ export function PopupApp() {
                   ))}
                 </select>
                 <button type="button" onClick={syncLibrary}>同步</button>
+                <button type="button" onClick={pullLibrary}>拉取</button>
                 <button
                   type="button"
                   onClick={deleteLibraryWordbook}

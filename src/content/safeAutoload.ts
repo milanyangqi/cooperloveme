@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.141";
+const SCRIPT_VERSION = "0.1.142";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -466,13 +466,15 @@ function loadSafeSettings(): SafeSettings {
   return settings;
 }
 
-function saveSafeSettings(settings: SafeSettings) {
+function saveSafeSettings(settings: SafeSettings, options: { renderPanel?: boolean; renderRows?: boolean } = {}) {
+  const renderPanelAfterSave = options.renderPanel ?? true;
+  const renderRowsAfterSave = options.renderRows ?? true;
   runtime.__yllSafeSettings = settings;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   applySafeSettings();
   updateModeSelect();
-  renderSettingsPanel();
-  renderRows(runtime.__yllSafeRows ?? []);
+  if (renderPanelAfterSave) renderSettingsPanel();
+  if (renderRowsAfterSave) renderRows(runtime.__yllSafeRows ?? []);
   updateActiveCue();
 }
 
@@ -2944,7 +2946,7 @@ function bindSettingsPanel(panel: HTMLElement) {
     panel.remove();
   });
   panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input[data-setting], select[data-setting]").forEach((input) => {
-    input.addEventListener("input", () => {
+    const readNext = () => {
       const current = loadSafeSettings();
       const key = input.dataset.setting as keyof SafeSettings;
       const next: SafeSettings = { ...current };
@@ -2955,6 +2957,37 @@ function bindSettingsPanel(panel: HTMLElement) {
       } else {
         (next[key] as boolean | number | string) = Number(input.value);
       }
+      return next;
+    };
+    const updateValueLabel = () => {
+      if (input.type !== "range") return;
+      const label = input.parentElement?.querySelector<HTMLElement>(".yll-setting-value");
+      if (!label) return;
+      const value = Number(input.value);
+      const key = input.dataset.setting;
+      label.textContent = key === "overlayPositionPercent"
+        ? `${100 - value}%`
+        : key === "overlayBackgroundOpacity"
+          ? `${value}%`
+          : key === "overlayFontSize" || key === "translationFontSize"
+            ? `${value}px`
+            : `${value}ms`;
+    };
+    if (input.type === "range") {
+      input.addEventListener("input", () => {
+        runtime.__yllSafeSettings = readNext();
+        updateValueLabel();
+        applySafeSettings();
+        updateActiveCue();
+      });
+      input.addEventListener("change", () => {
+        updateValueLabel();
+        saveSafeSettings(readNext(), { renderPanel: false });
+      });
+      return;
+    }
+    input.addEventListener("input", () => {
+      const next = readNext();
       saveSafeSettings(next);
     });
   });
@@ -4880,21 +4913,26 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
     if (!baseUrl) continue;
 
     const language = track.languageCode ?? track.language_code ?? getTrackName(track) ?? "unknown";
-    const formats = ["json3", "srv3", "vtt"];
-    for (const format of formats) {
+    const fetchPlans = [
+      { label: "base", setFormat: undefined },
+      { label: "json3", setFormat: "json3" },
+      { label: "srv3", setFormat: "srv3" },
+      { label: "vtt", setFormat: "vtt" }
+    ];
+    for (const plan of fetchPlans) {
       const url = new URL(baseUrl, location.href);
-      url.searchParams.set("fmt", format);
+      if (plan.setFormat) url.searchParams.set("fmt", plan.setFormat);
       try {
-        addDebugLog("tracks:fetch", { source, language, format, host: url.hostname, token: captionUrlRequiresPoToken(url) });
+        addDebugLog("tracks:fetch", { source, language, format: plan.label, host: url.hostname, token: captionUrlRequiresPoToken(url) });
         const body = await fetchCaptionText(url.toString());
         const rows = parseCaptionBody(videoId, body, source).filter((cue) => cue.text && videoId && language);
-        addDebugLog("tracks:parsed", { source, language, format, body: body.length, rows: rows.length });
+        addDebugLog("tracks:parsed", { source, language, format: plan.label, body: body.length, rows: rows.length });
         if (rows.length) return mergeAdjacentCues(rows);
         const tokenHint = captionUrlRequiresPoToken(url) && !body.trim() ? " token-gated exp=xpe" : "";
-        failures.push(`${language}/${format}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`);
+        failures.push(`${language}/${plan.label}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`);
       } catch (error) {
         const tokenHint = captionUrlRequiresPoToken(url) ? " token-gated exp=xpe;" : "";
-        failures.push(`${language}/${format}:${tokenHint} ${toErrorMessage(error)}`);
+        failures.push(`${language}/${plan.label}:${tokenHint} ${toErrorMessage(error)}`);
       }
     }
   }

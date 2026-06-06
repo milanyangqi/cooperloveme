@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-06 17:25:23 CST
+Last updated: 2026-06-06 18:23:47 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -38,7 +38,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Export / Anki / CSV | In Review | 2026-06-03 13:05 CST | `0.1.81` adds JSON, CSV, and Anki CSV exports inside the local library panel | Needs Chrome download review; advanced Pro export can be expanded later. |
 | Cloud sync | Planned | Pending | V2 sync model planned | Not part of current V1 recovery. |
 | Pro quotas / entitlement UI | Partial | 2026-06-01 | Popup/options/admin scaffolding exists | Backend second-pass checks still future work. |
-| Popup account login entry | In Review | 2026-06-06 17:25 CST | `0.1.118` keeps a stable account-loading state before `GET_BOOTSTRAP` returns and adds a Relingo-style popup settings tab | Needs extension reload and popup review. |
+| Popup account login entry | In Review | 2026-06-06 18:23 CST | `0.1.119` increases the popup container height and adds membership, export, recording-save, and sync controls to the settings tab | Needs extension reload and popup review. |
 | Admin console | Partial | 2026-06-01 | `docs/admin-management.md` | Needs production credential and full manual QA. |
 | Caption diagnostics panel | In Review | 2026-06-04 20:39 CST | `0.1.104` removes the default toolbar diagnostics button and keeps logs behind Alt-click on the title | Needs reload and quick Chrome review. |
 | Stale content-script protection | In Review | 2026-06-06 13:45 CST | `0.1.115` injects on all `www.youtube.com/*` pages and lets the script self-activate on watch routes, covering YouTube SPA navigation | Needs extension reload and fresh YouTube page review. |
@@ -225,6 +225,13 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - the new popup settings view exposes enable plugin, wordbook, source/target language, bilingual subtitles, native CC hiding, practice behavior, playback rate, and AI toggle controls through the existing `UPDATE_SETTINGS` path
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - runtime review still needs Chrome extension reload and a fresh YouTube watch tab because current Chrome is not exposed through a remote debugging control port
+
+- Local `0.1.119` popup settings expansion:
+  - increased the extension icon popup container from 360x520 to 390x680 so the settings view exposes more rows before scrolling
+  - added signed-in account actions for membership management and sign-out inside the popup settings tab
+  - added local export, cloud sync, and save-recording controls through existing background runtime messages/settings storage
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and popup review
 
 ### 2026-06-03
 

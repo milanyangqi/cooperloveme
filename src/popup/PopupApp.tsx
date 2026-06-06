@@ -4,6 +4,8 @@ import {
   Captions,
   CheckCircle2,
   ChevronRight,
+  CreditCard,
+  Download,
   Dumbbell,
   Languages,
   LogIn,
@@ -18,7 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { sendRuntimeMessage } from "../shared/messages";
-import type { EntitlementSnapshot, ExtensionSettings, RemoteAuthSnapshot, UserProfile } from "../shared/types";
+import type { EntitlementSnapshot, ExportBundle, ExtensionSettings, RemoteAuthSnapshot, UserProfile } from "../shared/types";
 
 type InjectResult = {
   href: string;
@@ -247,6 +249,34 @@ export function PopupApp() {
     await chrome.runtime.openOptionsPage();
   };
 
+  const startBilling = async () => {
+    const response = await sendRuntimeMessage<{ url: string }>({ type: "START_BILLING_CHECKOUT" });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+
+    await chrome.tabs.create({ url: response.data.url });
+    setStatus("已打开会员管理页面。");
+  };
+
+  const exportData = async () => {
+    const response = await sendRuntimeMessage<ExportBundle>({ type: "EXPORT_DATA" });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+
+    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `youtube-language-lab-export-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setStatus("本地学习数据已导出。");
+  };
+
   const updateSettings = async (patch: Partial<ExtensionSettings>) => {
     if (!settingsDraft) return;
 
@@ -405,8 +435,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.118 待审核</strong>
-              <p>修复账号加载闪烁，并补充插件内设置视图。</p>
+              <strong>0.1.119 待审核</strong>
+              <p>加长 popup 设置容器，并补充会员、导出和同步开关。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -438,6 +468,14 @@ export function PopupApp() {
                   value={isSignedIn ? bootstrap.entitlement.plan.toUpperCase() : "LOCAL"}
                   onClick={isSignedIn ? openOptions : () => setActiveView("home")}
                 />
+                {isSignedIn ? (
+                  <>
+                    <ActionSetting icon={<CreditCard size={17} />} label="会员管理" value={bootstrap.entitlement.plan.toUpperCase()} onClick={startBilling} />
+                    <ActionSetting icon={<LogOut size={17} />} label="退出登录" value="本地保留" onClick={signOut} />
+                  </>
+                ) : (
+                  <ActionSetting icon={<LogIn size={17} />} label="登录 / 注册" value="账号" onClick={() => setActiveView("home")} />
+                )}
               </SettingsSection>
 
               <SettingsSection title="基础设置" accent>
@@ -502,6 +540,27 @@ export function PopupApp() {
                   value={String(settings.playbackRate)}
                   options={PLAYBACK_RATE_OPTIONS}
                   onChange={(value) => void updateSettings({ playbackRate: Number(value) })}
+                />
+                <SwitchSetting
+                  icon={<Mic size={17} />}
+                  label="保存跟读录音"
+                  checked={settings.saveRawRecordings}
+                  onChange={(checked) => void updateSettings({ saveRawRecordings: checked })}
+                />
+              </SettingsSection>
+
+              <SettingsSection title="数据设置" accent>
+                <SwitchSetting
+                  icon={<ShieldCheck size={17} />}
+                  label="云同步"
+                  checked={settings.syncEnabled}
+                  onChange={(checked) => void updateSettings({ syncEnabled: checked })}
+                />
+                <ActionSetting
+                  icon={<Download size={17} />}
+                  label="导出数据"
+                  value={`${sentenceCount} 句 / ${vocabCount} 词`}
+                  onClick={exportData}
                 />
               </SettingsSection>
 

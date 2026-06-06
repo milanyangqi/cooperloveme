@@ -1,6 +1,6 @@
 # YouTube Language Lab Feature Timeline
 
-Last updated: 2026-06-07 11:45:00 CST
+Last updated: 2026-06-07 12:08:00 CST
 
 This file is the project memory for feature recovery. Update it whenever a feature is completed, restored, paused, or found broken.
 
@@ -18,7 +18,7 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | --- | --- | --- | --- | --- |
 | V1 local anonymous user model | Done | 2026-06-01 | Existing local user, local storage, and V1 account copy | V1 remains usable without registration. |
 | V2 account and entitlement planning | Done | 2026-06-01 | `docs/supabase-membership.md`, `docs/admin-management.md` | Email login and admin/entitlement backend are planned and partially scaffolded. |
-| Official YouTube caption loading | In Review | 2026-06-07 11:28 CST | `0.1.142` expands live player probing and tries official caption baseUrl unchanged before forced json3/srv3/vtt formats | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
+| Official YouTube caption loading | In Review | 2026-06-07 12:08 CST | `0.1.144` documents the no-regression rule in `AGENTS.md`, allows temporary official `video.textTracks` rows when full tracks are late, and schedules forced official retries so full captionTracks/timedtext can still replace them | Needs Chrome timing review on fresh page load and after clicking `重读字幕`. |
 | Caption fallback from visible CC | Done | 2026-06-02 14:57 CST | `0.1.60` throttles official retries while fallback is active | Verified that native CC remained hidden on `0.1.60`; fallback remains secondary to official captions. |
 | Native YouTube CC hiding | In Review | 2026-06-03 14:12 CST | `0.1.84` hides native YouTube captions whenever plugin subtitle rows exist, including visible-CC fallback | Needs fallback-video Chrome review. |
 | Right-side caption panel with full sentences | In Review | 2026-06-06 22:09 CST | `0.1.133` removes learning/practice controls from the right-side panel, leaving subtitle mode, close, status, and subtitle rows only | Needs Chrome review after extension reload. |
@@ -27,8 +27,8 @@ This file is the project memory for feature recovery. Update it whenever a featu
 | Bilingual overlay on video | In Review | 2026-06-06 13:34 CST | `0.1.114` uses the same sync clock for sentence display and word highlighting, avoids overlay-duration drag, and rejects coarse word timings | Needs extension reload and spoken-audio review. |
 | Free translation fallback | In Review | 2026-06-06 19:57 CST | `0.1.126` prioritizes current-cue translation, uses a smaller first batch, and stops invalidated stale scripts to avoid overlay flicker | Needs reload and Chrome review on an official-caption video. |
 | Click word for translation | In Review | 2026-06-06 13:51 CST | `0.1.115` enables hover/click lookup on video overlay words and reuses cached or pending free-translation lookups | Needs Chrome hover review. |
-| Subtitle settings panel | In Review | 2026-06-07 11:05 CST | `0.1.141` exposes a direct content-script open-settings function and uses it from the popup before falling back to the event path | Needs extension reload and Chrome review. |
-| Practice mode shell | In Review | 2026-06-06 22:52 CST | `0.1.135` keeps practice entry points in signed-in popup/settings/learning-library views instead of the subtitle-only right panel | Needs manual Chrome review; full Trancy-style layout still planned. |
+| Subtitle settings panel | In Review | 2026-06-07 12:08 CST | `0.1.144` adds more font choices plus source, translation, highlight, and background color controls with live overlay preview | Needs extension reload and Chrome review. |
+| Practice mode shell | In Review | 2026-06-07 12:08 CST | `0.1.144` exposes a direct content-script practice opener and keeps rendered subtitle rows available for practice when the row cache is temporarily empty | Needs manual Chrome review; full Trancy-style layout still planned. |
 | Shadowing / follow-read | In Review | 2026-06-02 20:44 CST | `0.1.70` adds microphone recording, local score cards, and practice-attempt save | Needs Chrome mic-permission review; AI scoring still future work. |
 | Dictation mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves dictation attempt after word-level hit/miss feedback | Needs Chrome review and visible history UI. |
 | Cloze / fill blank mode | In Review | 2026-06-02 20:44 CST | `0.1.70` saves cloze attempts after typed answer validation | Needs Chrome review and multi-blank UX tuning. |
@@ -423,6 +423,14 @@ This file is the project memory for feature recovery. Update it whenever a featu
   - page-vocab extraction now falls back to rendered right-panel subtitle rows when the content-script row cache is temporarily unavailable
   - opening mixed practice no longer dispatches a subtitle reload first, and practice can build rows from the rendered subtitle list
   - popup option links now open extension `options.html` directly instead of calling `chrome.runtime.openOptionsPage()` without a manifest options page
+  - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
+  - pending extension reload and Chrome review
+
+- Local `0.1.144` practice direct open, subtitle style controls, and official-caption guardrail:
+  - `AGENTS.md` now explicitly says UI, practice, fallback, and settings changes must not regress or interrupt official subtitle acquisition
+  - popup mixed-practice actions now call the content script's direct `__yllSafeOpenPractice` entry before falling back to event dispatch
+  - subtitle settings now include expanded font choices and color pickers for source text, translation text, current-word highlight, and subtitle background
+  - partial official `video.textTracks` rows can display temporarily when full official tracks are late, while a forced official retry remains scheduled for full captionTracks/timedtext recovery
   - local checks passed: `npm run typecheck`, `npm run build`, `npm audit --audit-level=moderate`, `git diff --check`
   - pending extension reload and Chrome review
 

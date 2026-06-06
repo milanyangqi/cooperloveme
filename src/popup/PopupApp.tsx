@@ -357,10 +357,16 @@ export function PopupApp() {
       await wakeSafeContentScript("全屏混合练习已唤醒，请在 YouTube 页面查看。", { reload: false });
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) return;
-      await chrome.scripting.executeScript({
+      const [result] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => window.dispatchEvent(new Event("yll-open-practice"))
+        func: () => {
+          const page = window as Window & { __yllSafeOpenPractice?: () => boolean };
+          if (page.__yllSafeOpenPractice?.()) return true;
+          window.dispatchEvent(new Event("yll-open-practice"));
+          return Boolean(document.getElementById("yll-lab-practice-v2"));
+        }
       });
+      setStatus(result?.result ? "全屏混合练习已打开。" : "已发送练习打开指令，请在 YouTube 页面查看。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "练习模式打开失败。");
     }
@@ -1007,8 +1013,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.143 待审核</strong>
-              <p>修复收藏句删除、本页生词兜底和混合练习入口。</p>
+              <strong>0.1.144 待审核</strong>
+              <p>修复混合练习入口，增强官方字幕保护和字幕样式。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

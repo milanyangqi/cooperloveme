@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.143";
+const SCRIPT_VERSION = "0.1.144";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -178,6 +178,10 @@ type SafeSettings = {
   highlightCurrentWord: boolean;
   sourceFontFamily: string;
   translationFontFamily: string;
+  sourceColor: string;
+  translationColor: string;
+  highlightColor: string;
+  overlayBackgroundColor: string;
 };
 
 type SubtitleMode = SafeSettings["subtitleMode"];
@@ -194,7 +198,11 @@ const DEFAULT_SETTINGS: SafeSettings = {
   wordHighlightOffsetMs: 0,
   highlightCurrentWord: true,
   sourceFontFamily: "system-ui",
-  translationFontFamily: "system-ui"
+  translationFontFamily: "system-ui",
+  sourceColor: "#f7f8f8",
+  translationColor: "#f5e86e",
+  highlightColor: "#ffc857",
+  overlayBackgroundColor: "#000000"
 };
 
 const runtime = window as typeof window & {
@@ -222,6 +230,7 @@ const runtime = window as typeof window & {
   __yllSafeScriptVersion?: string;
   __yllSafeStopCurrentScript?: () => void;
   __yllSafeOpenSettingsPanel?: () => boolean;
+  __yllSafeOpenPractice?: () => boolean;
   __yllSafeContextInvalidated?: boolean;
   __yllSafeIsLoadingOfficial?: boolean;
   __yllSafeCanUseVisibleFallback?: boolean;
@@ -322,12 +331,14 @@ function stopTimers() {
   clearScheduledOfficialRetry();
   clearStartupOfficialRetries();
   runtime.__yllSafeOpenSettingsPanel = undefined;
+  runtime.__yllSafeOpenPractice = undefined;
 }
 
 function announceScriptVersion() {
   runtime.__yllSafeScriptVersion = SCRIPT_VERSION;
   runtime.__yllSafeStopCurrentScript = stopCurrentScriptInstance;
   runtime.__yllSafeOpenSettingsPanel = openSettingsPanel;
+  runtime.__yllSafeOpenPractice = openPracticeEntry;
   try {
     window.dispatchEvent(new CustomEvent("yll-safe-version-active", { detail: { version: SCRIPT_VERSION } }));
   } catch {
@@ -427,6 +438,12 @@ function escapeHtml(text: string) {
 
 function cssFontFamily(value: string) {
   if (value === "serif") return "Georgia, 'Times New Roman', serif";
+  if (value === "georgia") return "Georgia, 'Times New Roman', serif";
+  if (value === "arial") return "Arial, Helvetica, sans-serif";
+  if (value === "helvetica") return "Helvetica, Arial, sans-serif";
+  if (value === "verdana") return "Verdana, Geneva, sans-serif";
+  if (value === "pingfang") return "'PingFang SC', 'Hiragino Sans GB', system-ui, sans-serif";
+  if (value === "microsoft-yahei") return "'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif";
   if (value === "sans-serif") return "Arial, Helvetica, sans-serif";
   if (value === "monospace") return "'SFMono-Regular', Menlo, Consolas, monospace";
   return "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
@@ -437,7 +454,36 @@ function parseSubtitleMode(value: unknown): SubtitleMode {
 }
 
 function parseFontFamily(value: unknown) {
-  return value === "system-ui" || value === "serif" || value === "sans-serif" || value === "monospace" ? value : DEFAULT_SETTINGS.sourceFontFamily;
+  return value === "system-ui" ||
+    value === "serif" ||
+    value === "georgia" ||
+    value === "arial" ||
+    value === "helvetica" ||
+    value === "verdana" ||
+    value === "pingfang" ||
+    value === "microsoft-yahei" ||
+    value === "sans-serif" ||
+    value === "monospace"
+    ? value
+    : DEFAULT_SETTINGS.sourceFontFamily;
+}
+
+function parseHexColor(value: unknown, fallback: string) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
+function hexToRgb(value: string) {
+  const normalized = parseHexColor(value, "#000000").slice(1);
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16)
+  };
+}
+
+function rgbaFromHex(value: string, opacityPercent: number) {
+  const color = hexToRgb(value);
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${Math.min(0.98, Math.max(0, opacityPercent / 100))})`;
 }
 
 function loadSafeSettings(): SafeSettings {
@@ -457,7 +503,11 @@ function loadSafeSettings(): SafeSettings {
       wordHighlightOffsetMs: Math.min(1500, Math.max(-1500, Number(stored.wordHighlightOffsetMs ?? DEFAULT_SETTINGS.wordHighlightOffsetMs))),
       highlightCurrentWord: Boolean(stored.highlightCurrentWord ?? DEFAULT_SETTINGS.highlightCurrentWord),
       sourceFontFamily: parseFontFamily(stored.sourceFontFamily),
-      translationFontFamily: parseFontFamily(stored.translationFontFamily)
+      translationFontFamily: parseFontFamily(stored.translationFontFamily),
+      sourceColor: parseHexColor(stored.sourceColor, DEFAULT_SETTINGS.sourceColor),
+      translationColor: parseHexColor(stored.translationColor, DEFAULT_SETTINGS.translationColor),
+      highlightColor: parseHexColor(stored.highlightColor, DEFAULT_SETTINGS.highlightColor),
+      overlayBackgroundColor: parseHexColor(stored.overlayBackgroundColor, DEFAULT_SETTINGS.overlayBackgroundColor)
     };
   } catch {
     settings = DEFAULT_SETTINGS;
@@ -482,6 +532,12 @@ function applySafeSettings() {
   const settings = loadSafeSettings();
   const hasPluginRows = (runtime.__yllSafeRows ?? []).length > 0;
   document.documentElement.classList.toggle("yll-hide-native-captions", settings.hideNativeCaptions && hasPluginRows);
+  document.documentElement.style.setProperty("--yll-source-font", cssFontFamily(settings.sourceFontFamily));
+  document.documentElement.style.setProperty("--yll-translation-font", cssFontFamily(settings.translationFontFamily));
+  document.documentElement.style.setProperty("--yll-source-color", settings.sourceColor);
+  document.documentElement.style.setProperty("--yll-translation-color", settings.translationColor);
+  document.documentElement.style.setProperty("--yll-highlight-color", settings.highlightColor);
+  document.documentElement.style.setProperty("--yll-preview-highlight", settings.highlightColor);
 }
 
 function updateModeSelect() {
@@ -940,10 +996,13 @@ function installStyle() {
       white-space: normal;
       overflow-wrap: anywhere;
       font-weight: 650;
+      color: var(--yll-source-color, #f7f8f8);
+      font-family: var(--yll-source-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
     }
     #${LIST_ID} .yll-translation {
       margin-top: 4px;
-      color: #cfd4dc;
+      color: var(--yll-translation-color, #cfd4dc);
+      font-family: var(--yll-translation-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
       font-size: 12px;
       font-weight: 500;
       overflow-wrap: anywhere;
@@ -972,7 +1031,7 @@ function installStyle() {
     #${LIST_ID} .yll-word:hover,
     #${LIST_ID} .yll-word:focus {
       color: #111;
-      background: #ffc857;
+      background: var(--yll-highlight-color, #ffc857);
       outline: none;
     }
     #${WORD_POPOVER_ID} {
@@ -1128,6 +1187,20 @@ function installStyle() {
       font-weight: 740;
       text-align: right;
     }
+    #${SETTINGS_PANEL_ID} input[type="color"] {
+      width: 36px;
+      height: 28px;
+      padding: 0;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 7px;
+      background: transparent;
+      cursor: pointer;
+    }
+    #${SETTINGS_PANEL_ID} input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+    #${SETTINGS_PANEL_ID} input[type="color"]::-webkit-color-swatch {
+      border: 0;
+      border-radius: 5px;
+    }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
     #${SETTINGS_PANEL_ID} .yll-preview-box {
       min-height: 190px;
@@ -1141,7 +1214,7 @@ function installStyle() {
       font-size: 28px;
       line-height: 1.35;
     }
-    #${SETTINGS_PANEL_ID} .yll-preview-box span { color: #ff006e; background: rgba(255,255,255,.08); padding: 0 4px; }
+    #${SETTINGS_PANEL_ID} .yll-preview-box span { color: var(--yll-preview-highlight, #ff006e); background: rgba(255,255,255,.08); padding: 0 4px; }
     #${LIBRARY_PANEL_ID} {
       flex: 1 1 auto;
       min-height: 0;
@@ -1647,6 +1720,7 @@ function installStyle() {
     #${OVERLAY_ID} .yll-overlay-source {
       display: block;
       font-family: var(--yll-source-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      color: var(--yll-source-color, #f7f8f8);
     }
     #${OVERLAY_ID} .yll-overlay-word {
       border-radius: 4px;
@@ -1657,19 +1731,19 @@ function installStyle() {
     #${OVERLAY_ID} .yll-overlay-word:hover,
     #${OVERLAY_ID} .yll-overlay-word:focus {
       color: #121212;
-      background: #ffe08a;
+      background: var(--yll-highlight-color, #ffe08a);
       text-shadow: none;
       outline: none;
     }
     #${OVERLAY_ID} .yll-overlay-word.is-current {
       color: #121212;
-      background: #ffc857;
+      background: var(--yll-highlight-color, #ffc857);
       text-shadow: none;
     }
     #${OVERLAY_ID} .yll-overlay-translation {
       display: block;
       margin-top: 4px;
-      color: #f5e86e;
+      color: var(--yll-translation-color, #f5e86e);
       font-family: var(--yll-translation-font, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
       font-size: var(--yll-translation-size, 20px);
       font-weight: 650;
@@ -2844,6 +2918,21 @@ function renderSettingsPanel() {
   bindSettingsPanel(existing);
 }
 
+function fontOptionsHtml(selected: string) {
+  return [
+    ["system-ui", "system"],
+    ["arial", "Arial"],
+    ["helvetica", "Helvetica"],
+    ["verdana", "Verdana"],
+    ["pingfang", "PingFang"],
+    ["microsoft-yahei", "微软雅黑"],
+    ["georgia", "Georgia"],
+    ["serif", "serif"],
+    ["sans-serif", "sans-serif"],
+    ["monospace", "monospace"]
+  ].map(([value, label]) => `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`).join("");
+}
+
 function settingsPanelHtml(settings: SafeSettings) {
   return `
     <div class="yll-settings-head">
@@ -2883,6 +2972,10 @@ function settingsPanelHtml(settings: SafeSettings) {
         <span><input type="range" min="20" max="95" step="1" data-setting="overlayBackgroundOpacity" value="${settings.overlayBackgroundOpacity}"> <span class="yll-setting-value">${settings.overlayBackgroundOpacity}%</span></span>
       </label>
       <label>
+        <span>字幕背景颜色</span>
+        <input type="color" data-setting="overlayBackgroundColor" value="${settings.overlayBackgroundColor}">
+      </label>
+      <label>
         <span>悬停查词<small>鼠标悬停字幕单词时显示释义。</small></span>
         <input type="checkbox" data-setting="highlightCurrentWord" ${settings.highlightCurrentWord ? "checked" : ""}>
       </label>
@@ -2900,11 +2993,16 @@ function settingsPanelHtml(settings: SafeSettings) {
       <label>
         <span>原字幕字体</span>
         <select data-setting="sourceFontFamily">
-          <option value="system-ui" ${settings.sourceFontFamily === "system-ui" ? "selected" : ""}>system</option>
-          <option value="sans-serif" ${settings.sourceFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
-          <option value="serif" ${settings.sourceFontFamily === "serif" ? "selected" : ""}>serif</option>
-          <option value="monospace" ${settings.sourceFontFamily === "monospace" ? "selected" : ""}>monospace</option>
+          ${fontOptionsHtml(settings.sourceFontFamily)}
         </select>
+      </label>
+      <label>
+        <span>原字幕颜色</span>
+        <input type="color" data-setting="sourceColor" value="${settings.sourceColor}">
+      </label>
+      <label>
+        <span>高亮颜色</span>
+        <input type="color" data-setting="highlightColor" value="${settings.highlightColor}">
       </label>
     </div>
     <div class="yll-settings-group">
@@ -2916,11 +3014,12 @@ function settingsPanelHtml(settings: SafeSettings) {
       <label>
         <span>译文字体</span>
         <select data-setting="translationFontFamily">
-          <option value="system-ui" ${settings.translationFontFamily === "system-ui" ? "selected" : ""}>system</option>
-          <option value="sans-serif" ${settings.translationFontFamily === "sans-serif" ? "selected" : ""}>sans-serif</option>
-          <option value="serif" ${settings.translationFontFamily === "serif" ? "selected" : ""}>serif</option>
-          <option value="monospace" ${settings.translationFontFamily === "monospace" ? "selected" : ""}>monospace</option>
+          ${fontOptionsHtml(settings.translationFontFamily)}
         </select>
+      </label>
+      <label>
+        <span>译文颜色</span>
+        <input type="color" data-setting="translationColor" value="${settings.translationColor}">
       </label>
     </div>
     <div class="yll-settings-group">
@@ -2936,7 +3035,7 @@ function settingsPanelHtml(settings: SafeSettings) {
     </div>
     <div class="yll-settings-group">
       <h4>样式预览</h4>
-      <div class="yll-preview-box">You can read<br>the <span>demo</span> content<br>您可以查看示例内容</div>
+      <div class="yll-preview-box" style="background:${settings.overlayBackgroundColor};color:${settings.sourceColor};font-family:${cssFontFamily(settings.sourceFontFamily)}">You can read<br>the <span style="color:${settings.highlightColor}">demo</span> content<br><em style="color:${settings.translationColor};font-family:${cssFontFamily(settings.translationFontFamily)}">您可以查看示例内容</em></div>
     </div>
   `;
 }
@@ -2953,6 +3052,8 @@ function bindSettingsPanel(panel: HTMLElement) {
       if (input.type === "checkbox") {
         (next[key] as boolean | number | string) = (input as HTMLInputElement).checked;
       } else if (input instanceof HTMLSelectElement) {
+        (next[key] as boolean | number | string) = input.value;
+      } else if (input.type === "color") {
         (next[key] as boolean | number | string) = input.value;
       } else {
         (next[key] as boolean | number | string) = Number(input.value);
@@ -2973,7 +3074,7 @@ function bindSettingsPanel(panel: HTMLElement) {
             ? `${value}px`
             : `${value}ms`;
     };
-    if (input.type === "range") {
+    if (input.type === "range" || input.type === "color") {
       input.addEventListener("input", () => {
         runtime.__yllSafeSettings = readNext();
         updateValueLabel();
@@ -3464,9 +3565,12 @@ function setOverlayCue(cue?: LabCue) {
   const showSource = settings.subtitleMode !== "translation" || !translation;
   const showTranslation = Boolean(translation && settings.showTranslations && settings.subtitleMode !== "source");
   const translationText = showTranslation && translation ? translation : "";
-  overlay.style.background = `rgba(0, 0, 0, ${settings.overlayBackgroundOpacity / 100})`;
+  overlay.style.background = rgbaFromHex(settings.overlayBackgroundColor, settings.overlayBackgroundOpacity);
   overlay.style.setProperty("--yll-source-font", cssFontFamily(settings.sourceFontFamily));
   overlay.style.setProperty("--yll-translation-font", cssFontFamily(settings.translationFontFamily));
+  overlay.style.setProperty("--yll-source-color", settings.sourceColor);
+  overlay.style.setProperty("--yll-translation-color", settings.translationColor);
+  overlay.style.setProperty("--yll-highlight-color", settings.highlightColor);
   overlay.style.setProperty("--yll-translation-size", `${settings.translationFontSize}px`);
   overlay.innerHTML = `
     ${showSource ? `<span class="yll-overlay-source">${renderOverlaySourceText(cue, settings)}</span>` : ""}
@@ -3672,6 +3776,12 @@ function lockOfficialRowsForCurrentVideo(videoId = getVideoId()) {
 function scheduleOfficialRetry(delayMs: number, reason: string) {
   const videoId = getVideoId();
   if (!videoId || hasOfficialRows()) return;
+  scheduleForcedOfficialRetry(delayMs, reason);
+}
+
+function scheduleForcedOfficialRetry(delayMs: number, reason: string) {
+  const videoId = getVideoId();
+  if (!videoId) return;
   clearScheduledOfficialRetry();
   runtime.__yllSafeOfficialRetryTimer = window.setTimeout(() => {
     runtime.__yllSafeOfficialRetryTimer = undefined;
@@ -5345,6 +5455,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
   });
 
   for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
+    let partialTextTrackRows: LabCue[] = [];
     setCaptionStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`, "官方字幕轨道");
     try {
       const includeSlowPaths = attempt > 0 || Boolean(options.force) || Boolean(hasVisibleRows && runtime.__yllSafeOfficialAttemptCount % 4 === 0);
@@ -5388,6 +5499,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
           addDebugLog("load:text-track-success", { rows: textTrackRows.length });
           return;
         }
+        partialTextTrackRows = textTrackRows;
         runtime.__yllSafeLastOfficialDebug?.push(`textTracks partial:${textTrackRows.length}`);
         addDebugLog("load:text-track-partial", {
           rows: textTrackRows.length,
@@ -5413,6 +5525,15 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
     } catch (error) {
       runtime.__yllSafeLastFailure = `timedtext: ${toErrorMessage(error)}`;
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
+    }
+
+    if (partialTextTrackRows.length >= 2 && !(runtime.__yllSafeRows ?? []).length) {
+      saveRows(partialTextTrackRows, "video.textTracks 临时");
+      runtime.__yllSafeIsLoadingOfficial = false;
+      runtime.__yllSafeLoadingVideoId = undefined;
+      runtime.__yllSafeLastOfficialDebug = [`partial:video.textTracks:${partialTextTrackRows.length}`];
+      scheduleForcedOfficialRetry(2500, `partial-texttracks-${attempt + 1}`);
+      return;
     }
 
     if (attempt + 1 >= OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS && !hasVisibleRows && !hasOfficialRows()) {
@@ -5607,7 +5728,7 @@ function start() {
 
 window.addEventListener("yt-navigate-finish", () => window.setTimeout(start, 350));
 window.addEventListener("popstate", () => window.setTimeout(start, 350));
-window.addEventListener("yll-open-practice", () => {
+function openPracticeEntry() {
   void requireSignedInFeature("练习当前句").then((allowed) => {
     if (!allowed) return;
     const renderedRows = rowsFromRenderedCaptionList();
@@ -5617,13 +5738,23 @@ window.addEventListener("yll-open-practice", () => {
       openPracticeOverlay(renderedRows);
       return;
     }
-    if (!(runtime.__yllSafeRows ?? []).length) {
-      setStatus("正在读取字幕，稍后再打开练习模式。");
-      void loadRowsForCurrentVideo({ force: true, reason: "practice-open" }).then(() => openPracticeOverlay()).catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
+    if ((runtime.__yllSafeRows ?? []).length) {
+      openPracticeOverlay();
       return;
     }
-    openPracticeOverlay();
+    setStatus("正在读取字幕，稍后再打开练习模式。");
+    void loadRowsForCurrentVideo({ force: true, reason: "practice-open" })
+      .then(() => {
+        const rows = runtime.__yllSafeRows?.length ? runtime.__yllSafeRows : rowsFromRenderedCaptionList();
+        openPracticeOverlay(rows);
+      })
+      .catch((error) => setStatus(`练习模式打开失败：${toErrorMessage(error)}`));
   });
+  return true;
+}
+
+window.addEventListener("yll-open-practice", () => {
+  openPracticeEntry();
 });
 window.addEventListener("yll-save-current-sentence", () => {
   void requireSignedInFeature("收藏当前句").then(async (allowed) => {

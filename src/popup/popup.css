@@ -144,14 +144,14 @@ html.yll-dock-popup .popup {
 
 .action-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .action-grid button,
 .settings-link {
-  min-height: 42px;
+  min-height: 36px;
   border: 0;
   border-radius: 8px;
   background: #ffc857;
@@ -160,17 +160,14 @@ html.yll-dock-popup .popup {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
+  font-size: 13px;
   cursor: pointer;
 }
 
 .action-grid button:nth-child(2) {
   background: #57d6a4;
   color: #062217;
-}
-
-.action-grid button:last-child {
-  grid-column: 1 / -1;
 }
 
 .account-card {
@@ -684,7 +681,7 @@ html.yll-dock-popup .popup {
   min-height: 54px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
@@ -718,6 +715,44 @@ html.yll-dock-popup .popup {
   font-size: 12px;
   font-style: normal;
   font-weight: 760;
+}
+
+.popup-library-row > button {
+  min-height: 30px;
+  border: 1px solid rgba(255, 105, 105, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 105, 105, 0.14);
+  color: #ffd0d0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.sentence-save-inline {
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: #ffc857;
+  color: #211700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-weight: 760;
+}
+
+.word-list > .sentence-save-inline,
+.empty-preview .sentence-save-inline {
+  width: fit-content;
+  min-height: 34px;
+  border-top: 0;
+  display: inline-flex;
+  grid-template-columns: none;
+  text-align: center;
 }
 
 .popup-sentence-list {

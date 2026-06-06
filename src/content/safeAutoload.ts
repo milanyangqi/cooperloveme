@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.136";
+const SCRIPT_VERSION = "0.1.137";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -160,6 +160,7 @@ const TRANSLATION_RETRY_BACKOFF_MS = 15000;
 const OFFICIAL_RETRY_MS = 3500;
 const OFFICIAL_FALLBACK_RETRY_MS = 6000;
 const OFFICIAL_AUTO_ATTEMPTS = 6;
+const OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS = 2;
 const OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS = 3500;
 const OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS = 12000;
 const USER_SCROLL_PAUSE_MS = 4200;
@@ -5234,18 +5235,28 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
 
+    if (attempt + 1 >= OFFICIAL_VISIBLE_FALLBACK_AFTER_ATTEMPTS && !hasVisibleRows && !hasOfficialRows()) {
+      enableVisibleFallback(`early-fallback-${attempt + 1}`);
+      scheduleOfficialRetry(3000, `official-background-after-${attempt + 1}`);
+      return;
+    }
+
     await new Promise((resolve) => window.setTimeout(resolve, 600));
   }
 
+  enableVisibleFallback("fallback-enabled");
+  scheduleOfficialRetry(3000, "fallback-enabled");
+}
+
+function enableVisibleFallback(reason: string) {
   runtime.__yllSafeIsLoadingOfficial = false;
   runtime.__yllSafeLoadingVideoId = undefined;
   runtime.__yllSafeCanUseVisibleFallback = true;
   runtime.__yllSafeLastOfficialFailureAt = Date.now();
   ensureNativeCaptionsForFallback();
   const debug = runtime.__yllSafeLastOfficialDebug?.slice(-2).join(" / ");
-  addDebugLog("load:fallback-enabled", { debug });
-  setCaptionStatus(`官方字幕暂未读到，${Math.round(OFFICIAL_FALLBACK_RETRY_MS / 1000)} 秒后自动重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`, "页面字幕采集");
-  scheduleOfficialRetry(3000, "fallback-enabled");
+  addDebugLog("load:fallback-enabled", { reason, debug });
+  setCaptionStatus(`官方字幕暂未读到，后台会继续重试；当前先临时采集页面字幕。${debug ? `最近错误：${debug}` : ""}`, "页面字幕采集");
 }
 
 function captureVisibleFallback() {

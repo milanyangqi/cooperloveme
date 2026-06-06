@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   UserRound
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -531,13 +532,21 @@ export function PopupApp() {
   };
 
   const syncLibrary = async () => {
+    const confirmed = window.confirm("确认将本地词本、生词、收藏句、练习记录和设置上传同步到 Supabase？");
+    if (!confirmed) {
+      setStatus("已取消 Supabase 同步。");
+      return;
+    }
     setStatus("正在同步学习数据到 Supabase...");
     const response = await sendRuntimeMessage<{ synced: number; failed: number }>({ type: "SYNC_LIBRARY" });
     if (!response.ok) {
       setStatus(response.error);
+      window.alert(response.error);
       return;
     }
-    setStatus(response.data.failed ? `同步完成：${response.data.synced} 条成功，${response.data.failed} 条失败。` : `已同步 ${response.data.synced} 条学习数据。`);
+    const message = response.data.failed ? `同步完成：${response.data.synced} 条成功，${response.data.failed} 条失败。` : `已同步 ${response.data.synced} 条学习数据。`;
+    setStatus(message);
+    window.alert(message);
     await reloadBootstrap();
   };
 
@@ -583,6 +592,28 @@ export function PopupApp() {
     } finally {
       setWordActionBusy("");
     }
+  };
+
+  const deleteLibraryWord = async (item: VocabPreview) => {
+    if (!item.id) {
+      setStatus("这个单词还没有保存到词本。");
+      return;
+    }
+    const confirmed = window.confirm(`确认从当前词本删除「${item.text ?? "这个单词"}」？`);
+    if (!confirmed) return;
+    const response = await sendRuntimeMessage<{ deleted: boolean }>({ type: "DELETE_VOCAB", payload: { id: item.id } });
+    if (!response.ok) {
+      setStatus(response.error);
+      return;
+    }
+    setBootstrap((current) => {
+      if (!current) return current;
+      const nextItems = (current.library.vocabItems as VocabPreview[]).filter((word) => word.id !== item.id);
+      return { ...current, library: { ...current.library, vocabItems: nextItems } };
+    });
+    setStatus(response.data.deleted ? "单词已删除。" : "没有找到要删除的单词。");
+    await reloadBootstrap();
+    await refreshPageWords();
   };
 
   const updateSettings = async (patch: Partial<ExtensionSettings>) => {
@@ -735,6 +766,10 @@ export function PopupApp() {
                 ) : null}
                 {previewTab === "sentences" && recentSentences.length ? (
                   <div className="word-list">
+                    <button className="sentence-save-inline" type="button" onClick={saveCurrentSentence}>
+                      <BookMarked size={15} />
+                      <span>收藏当前句</span>
+                    </button>
                     {recentSentences.map((item, index) => (
                       <button key={`${item.text ?? "sentence"}-${index}`} type="button" onClick={openLearningLibrary}>
                         <span>
@@ -752,6 +787,12 @@ export function PopupApp() {
                   <div className="empty-preview">
                     <CircleAlert size={18} />
                     <span>{previewEmptyText(previewTab, pageWords.length)}</span>
+                    {previewTab === "sentences" ? (
+                      <button className="sentence-save-inline" type="button" onClick={saveCurrentSentence}>
+                        <BookMarked size={15} />
+                        收藏当前句
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </section>
@@ -820,19 +861,13 @@ export function PopupApp() {
               <BookOpen size={17} />
               重读字幕
             </button>
-            {isSignedIn ? (
-              <button type="button" onClick={saveCurrentSentence}>
-                <BookMarked size={17} />
-                收藏当前句
-              </button>
-            ) : null}
           </div>
 
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.136 待审核</strong>
-              <p>恢复官方字幕重试强度，并补全词本管理与句子收藏入口。</p>
+              <strong>0.1.137 待审核</strong>
+              <p>优化字幕早期 fallback、词本删除和 Supabase 同步提示。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />
@@ -1033,6 +1068,10 @@ export function PopupApp() {
                       <small>{item.meaning ?? item.sourceSentence ?? "释义待补充"}</small>
                     </span>
                     <em>{(item.mastery ?? 0) >= 4 ? "已掌握" : "生词"}</em>
+                    <button type="button" onClick={() => void deleteLibraryWord(item)} title="从当前词本删除">
+                      <Trash2 size={14} />
+                      删除
+                    </button>
                   </div>
                 )) : (
                   <div className="empty-preview">

@@ -630,8 +630,8 @@ export function PopupApp() {
           <section className="account-card">
             <div>
               <span className="label">当前版本</span>
-              <strong>0.1.127 待审核</strong>
-              <p>词本单词支持手动删除，学习库面板改为占满字幕容器内容区。</p>
+              <strong>0.1.128 待审核</strong>
+              <p>学习库在状态通知、字幕重读和脚本恢复时保持打开。</p>
             </div>
             <span className="plan">
               <ShieldCheck size={13} />

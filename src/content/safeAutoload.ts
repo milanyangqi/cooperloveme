@@ -137,7 +137,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.127";
+const SCRIPT_VERSION = "0.1.128";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -232,6 +232,7 @@ const runtime = window as typeof window & {
   __yllSafeExpandedInsightKey?: string;
   __yllSafeWasAdShowing?: boolean;
   __yllSafeLibraryOpen?: boolean;
+  __yllSafeLibraryLoading?: boolean;
   __yllSafeLastLibraryToggleAt?: number;
   __yllSafeSelectedWordbookId?: string;
   __yllSafePanelDismissedVideoId?: string;
@@ -1604,6 +1605,7 @@ function mountPanel() {
   bindCaptionListScrollState(panel.querySelector<HTMLElement>(`#${LIST_ID}`));
   applySafeSettings();
   updateModeSelect();
+  ensureLibraryPanelVisible();
   return panel;
 }
 
@@ -1669,6 +1671,7 @@ function setStatus(text: string) {
     status.textContent = text;
     status.title = text;
   }
+  ensureLibraryPanelVisible();
 }
 
 function setCaptionStatus(text: string, sourceLabel?: string) {
@@ -1677,6 +1680,7 @@ function setCaptionStatus(text: string, sourceLabel?: string) {
   const badge = sourceLabel ? captionSourceBadge(sourceLabel) : "";
   status.innerHTML = `${badge}${escapeHtml(text)}`;
   status.title = sourceLabel ? `${captionSourceText(sourceLabel)} · ${text}` : text;
+  ensureLibraryPanelVisible();
 }
 
 function captionSourceText(sourceLabel: string) {
@@ -1744,17 +1748,22 @@ async function toggleLibraryPanel(options: { forceOpen?: boolean } = {}) {
   if (existing) {
     if (options.forceOpen) {
       runtime.__yllSafeLibraryOpen = true;
+      document.getElementById(PANEL_ID)?.classList.add("yll-library-open");
       return;
     }
-    runtime.__yllSafeLibraryOpen = false;
-    existing.remove();
+    closeLibraryPanel();
     return;
   }
-  runtime.__yllSafeLibraryOpen = true;
 
-  const panel = document.createElement("section");
-  panel.id = LIBRARY_PANEL_ID;
-  document.getElementById(PANEL_ID)?.classList.add("yll-library-open");
+  await openLibraryPanel();
+}
+
+async function openLibraryPanel() {
+  if (runtime.__yllSafeLibraryLoading) return;
+  runtime.__yllSafeLibraryOpen = true;
+  runtime.__yllSafeLibraryLoading = true;
+
+  const panel = mountLibraryPanelElement();
   panel.innerHTML = `
     <div class="yll-library-head">
       <h3>本地学习库</h3>
@@ -1763,13 +1772,6 @@ async function toggleLibraryPanel(options: { forceOpen?: boolean } = {}) {
     <div class="yll-library-empty">正在读取本地学习记录...</div>
   `;
   panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => closeLibraryPanel());
-  const host = document.getElementById(PANEL_ID) ?? document.documentElement;
-  const list = document.getElementById(LIST_ID);
-  if (host === document.documentElement || !list) {
-    host.appendChild(panel);
-  } else {
-    host.insertBefore(panel, list);
-  }
 
   try {
     const response = await sendRuntimeMessage<LibrarySnapshot>({ type: "GET_LIBRARY" });
@@ -1788,11 +1790,38 @@ async function toggleLibraryPanel(options: { forceOpen?: boolean } = {}) {
       <div class="yll-library-empty">${escapeHtml(message)}</div>
     `;
     panel.querySelector<HTMLButtonElement>(".yll-library-close")?.addEventListener("click", () => closeLibraryPanel());
+  } finally {
+    runtime.__yllSafeLibraryLoading = false;
   }
+}
+
+function mountLibraryPanelElement() {
+  const existing = document.getElementById(LIBRARY_PANEL_ID);
+  document.getElementById(PANEL_ID)?.classList.add("yll-library-open");
+  if (existing) return existing;
+
+  const panel = document.createElement("section");
+  panel.id = LIBRARY_PANEL_ID;
+  const host = document.getElementById(PANEL_ID) ?? document.documentElement;
+  const list = document.getElementById(LIST_ID);
+  if (host === document.documentElement || !list) {
+    host.appendChild(panel);
+  } else {
+    host.insertBefore(panel, list);
+  }
+  return panel;
+}
+
+function ensureLibraryPanelVisible() {
+  if (!runtime.__yllSafeLibraryOpen) return;
+  document.getElementById(PANEL_ID)?.classList.add("yll-library-open");
+  if (document.getElementById(LIBRARY_PANEL_ID) || runtime.__yllSafeLibraryLoading) return;
+  void openLibraryPanel();
 }
 
 function closeLibraryPanel() {
   runtime.__yllSafeLibraryOpen = false;
+  runtime.__yllSafeLibraryLoading = false;
   document.getElementById(PANEL_ID)?.classList.remove("yll-library-open");
   document.getElementById(LIBRARY_PANEL_ID)?.remove();
 }
@@ -3418,7 +3447,6 @@ function handleInvalidatedExtensionContext() {
   stopTimers();
   setStatus("扩展上下文已过期。请点击 popup 的“唤醒面板”重新注入新版脚本。");
   addDebugLog("extension-context-invalidated", { version: SCRIPT_VERSION });
-  closeLibraryPanel();
   document.getElementById(OVERLAY_ID)?.remove();
   document.getElementById(WORD_POPOVER_ID)?.remove();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
@@ -5155,10 +5183,10 @@ window.addEventListener("yll-safe-reload", () => {
   document.getElementById(WORD_POPOVER_ID)?.remove();
   document.getElementById(SETTINGS_PANEL_ID)?.remove();
   document.getElementById(PRACTICE_ID)?.remove();
-  closeLibraryPanel();
   renderRows([]);
   setOverlayCue(undefined);
   start();
+  ensureLibraryPanelVisible();
 });
 window.setTimeout(start, 0);
 window.setTimeout(start, 900);

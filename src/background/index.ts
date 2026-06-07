@@ -155,7 +155,7 @@ async function wakeExistingYouTubeWatchTabs(reason: string): Promise<void> {
 async function handleMessage(message: RuntimeRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
   switch (message.type) {
     case "READ_ACTIVE_PAGE_WORDS":
-      return readActivePageWords();
+      return readActivePageWords(sender);
 
     case "READ_PAGE_PLAYER_RESPONSE":
       if (!sender.tab?.id) {
@@ -829,12 +829,12 @@ async function readLivePlayerSnapshot(tabId: number): Promise<unknown> {
   return injection?.result ?? {};
 }
 
-async function readActivePageWords(): Promise<{
+async function readActivePageWords(sender?: chrome.runtime.MessageSender): Promise<{
   version?: string;
   videoId?: string;
   words: Array<{ text: string; sourceSentence?: string; translatedSentence?: string }>;
 }> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = sender?.tab?.id && sender.tab.url ? sender.tab : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
   if (!tab?.id || !tab.url) return { words: [] };
 
   const parsed = new URL(tab.url);
@@ -858,13 +858,50 @@ async function readActivePageWords(): Promise<{
           .toLowerCase()
           .replace(/^[^a-z]+|[^a-z]+$/g, "")
           .replace(/'{2,}/g, "'");
-      const rows = Array.isArray(page.__yllSafeRows) && page.__yllSafeRows.length
-        ? page.__yllSafeRows
-        : Array.from(document.querySelectorAll<HTMLElement>("#yll-lab-list-v2 .yll-row")).map((row) => ({
-          text: row.querySelector<HTMLElement>(".yll-text")?.textContent?.trim(),
-          translatedText: row.querySelector<HTMLElement>(".yll-translation")?.textContent?.trim(),
+      const stopWords = new Set([
+        "a", "an", "and", "are", "as", "at", "be", "been", "being", "but", "by", "can", "could", "did", "do", "does",
+        "for", "from", "had", "has", "have", "he", "her", "here", "him", "his", "i", "if", "in", "is", "it", "its",
+        "me", "my", "of", "on", "or", "our", "she", "so", "than", "that", "the", "their", "them", "then", "there",
+        "these", "they", "this", "those", "to", "us", "was", "we", "were", "what", "when", "where", "which", "who",
+        "will", "with", "would", "you", "your", "ve", "re", "ll"
+      ]);
+      const rows: SafeRow[] = [];
+      const seenRows = new Set<string>();
+      const pushRow = (row: SafeRow) => {
+        const text = typeof row.text === "string" ? row.text.trim() : "";
+        if (!text) return;
+        const start = Number.isFinite(row.start) ? Number(row.start) : 0;
+        const key = `${start}:${text}`;
+        if (seenRows.has(key)) return;
+        seenRows.add(key);
+        rows.push({
+          text,
+          translatedText: typeof row.translatedText === "string" ? row.translatedText.trim() : undefined,
+          start
+        });
+      };
+      if (Array.isArray(page.__yllSafeRows)) {
+        page.__yllSafeRows.forEach(pushRow);
+      }
+      Array.from(document.querySelectorAll<HTMLElement>("#yll-lab-list-v2 .yll-row")).forEach((row) => {
+        const rowText = row.textContent?.trim() ?? "";
+        const translatedText = row.querySelector<HTMLElement>(".yll-translation")?.textContent?.trim();
+        const sourceText = row.querySelector<HTMLElement>(".yll-text")?.textContent?.trim();
+        const fallbackText = translatedText ? rowText.replace(translatedText, "").replace(/^\s*\d+:\d+\s*/, "").trim() : rowText.replace(/^\s*\d+:\d+\s*/, "").trim();
+        pushRow({
+          text: sourceText || fallbackText,
+          translatedText,
           start: Number(row.dataset.start ?? "0")
-        }));
+        });
+      });
+      const overlay = document.querySelector<HTMLElement>("#yll-lab-overlay-v2");
+      if (overlay) {
+        pushRow({
+          text: overlay.querySelector<HTMLElement>(".yll-overlay-source")?.textContent?.trim(),
+          translatedText: overlay.querySelector<HTMLElement>(".yll-overlay-translation")?.textContent?.trim(),
+          start: Number(overlay.querySelector<HTMLElement>(".yll-overlay-word[data-start]")?.dataset.start ?? "0")
+        });
+      }
       const words = new Map<string, { text: string; sourceSentence?: string; translatedSentence?: string; firstStart: number }>();
 
       rows.forEach((row) => {
@@ -872,7 +909,7 @@ async function readActivePageWords(): Promise<{
         if (!sourceSentence) return;
         sourceSentence.match(/[A-Za-z][A-Za-z'-]*/g)?.forEach((rawToken) => {
           const text = cleanToken(rawToken);
-          if (text.length < 2 || /^\d+$/.test(text)) return;
+          if (text.length < 2 || /^\d+$/.test(text) || stopWords.has(text)) return;
           if (!words.has(text)) {
             words.set(text, {
               text,
@@ -886,7 +923,7 @@ async function readActivePageWords(): Promise<{
 
       return {
         version: page.__yllSafeScriptVersion,
-        videoId: page.__yllSafeLoadedVideoId,
+        videoId: page.__yllSafeLoadedVideoId || new URLSearchParams(location.search).get("v") || undefined,
         words: Array.from(words.values())
           .sort((a, b) => a.firstStart - b.firstStart || a.text.localeCompare(b.text))
           .map(({ firstStart: _firstStart, ...word }) => word)

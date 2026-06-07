@@ -140,7 +140,7 @@ const OLD_PRACTICE_ID = "yll-safe-practice";
 const LEGACY_HOST_ID = "youtube-language-lab-root";
 const LEGACY_NATIVE_HIDE_STYLE_ID = "yll-hide-native-captions-style";
 const SETTINGS_KEY = "yll-safe-settings-v1";
-const SCRIPT_VERSION = "0.1.147";
+const SCRIPT_VERSION = "0.2.0";
 const POLL_MS = 500;
 const WORD_HIGHLIGHT_POLL_MS = 90;
 const MAX_VISIBLE_ROWS = 260;
@@ -184,10 +184,20 @@ type SafeSettings = {
   sourceColor: string;
   translationColor: string;
   highlightColor: string;
+  partOfSpeechHighlightEnabled: boolean;
+  highlightNounEnabled: boolean;
+  highlightVerbEnabled: boolean;
+  highlightAdjectiveEnabled: boolean;
+  highlightAdverbEnabled: boolean;
+  highlightNounColor: string;
+  highlightVerbColor: string;
+  highlightAdjectiveColor: string;
+  highlightAdverbColor: string;
   overlayBackgroundColor: string;
 };
 
 type SubtitleMode = SafeSettings["subtitleMode"];
+type HighlightPartOfSpeech = "noun" | "verb" | "adjective" | "adverb";
 type SettingsPanelView = "subtitle" | "highlight";
 
 const DEFAULT_SETTINGS: SafeSettings = {
@@ -209,6 +219,15 @@ const DEFAULT_SETTINGS: SafeSettings = {
   sourceColor: "#f5f5f5",
   translationColor: "#e6e6e6",
   highlightColor: "#8b5cf6",
+  partOfSpeechHighlightEnabled: true,
+  highlightNounEnabled: true,
+  highlightVerbEnabled: true,
+  highlightAdjectiveEnabled: true,
+  highlightAdverbEnabled: true,
+  highlightNounColor: "#f33478",
+  highlightVerbColor: "#7f57d8",
+  highlightAdjectiveColor: "#42bbc1",
+  highlightAdverbColor: "#43c000",
   overlayBackgroundColor: "#000000"
 };
 
@@ -222,6 +241,7 @@ const runtime = window as typeof window & {
   __yllSafeRows?: LabCue[];
   __yllSafeRowsGeneration?: number;
   __yllSafeActiveKey?: string;
+  __yllSafeOverlayRenderedSignature?: string;
   __yllSafeLoadedVideoId?: string;
   __yllSafeLoadingVideoId?: string;
   __yllSafeOfficialLockedVideoId?: string;
@@ -518,6 +538,15 @@ function loadSafeSettings(): SafeSettings {
       sourceColor: parseHexColor(stored.sourceColor, DEFAULT_SETTINGS.sourceColor),
       translationColor: parseHexColor(stored.translationColor, DEFAULT_SETTINGS.translationColor),
       highlightColor: parseHexColor(stored.highlightColor, DEFAULT_SETTINGS.highlightColor),
+      partOfSpeechHighlightEnabled: Boolean(stored.partOfSpeechHighlightEnabled ?? DEFAULT_SETTINGS.partOfSpeechHighlightEnabled),
+      highlightNounEnabled: Boolean(stored.highlightNounEnabled ?? DEFAULT_SETTINGS.highlightNounEnabled),
+      highlightVerbEnabled: Boolean(stored.highlightVerbEnabled ?? DEFAULT_SETTINGS.highlightVerbEnabled),
+      highlightAdjectiveEnabled: Boolean(stored.highlightAdjectiveEnabled ?? DEFAULT_SETTINGS.highlightAdjectiveEnabled),
+      highlightAdverbEnabled: Boolean(stored.highlightAdverbEnabled ?? DEFAULT_SETTINGS.highlightAdverbEnabled),
+      highlightNounColor: parseHexColor(stored.highlightNounColor, DEFAULT_SETTINGS.highlightNounColor),
+      highlightVerbColor: parseHexColor(stored.highlightVerbColor, DEFAULT_SETTINGS.highlightVerbColor),
+      highlightAdjectiveColor: parseHexColor(stored.highlightAdjectiveColor, DEFAULT_SETTINGS.highlightAdjectiveColor),
+      highlightAdverbColor: parseHexColor(stored.highlightAdverbColor, DEFAULT_SETTINGS.highlightAdverbColor),
       overlayBackgroundColor: parseHexColor(stored.overlayBackgroundColor, DEFAULT_SETTINGS.overlayBackgroundColor)
     };
   } catch {
@@ -549,6 +578,10 @@ function applySafeSettings() {
   document.documentElement.style.setProperty("--yll-translation-color", settings.translationColor);
   document.documentElement.style.setProperty("--yll-highlight-color", settings.highlightColor);
   document.documentElement.style.setProperty("--yll-preview-highlight", settings.highlightColor);
+  document.documentElement.style.setProperty("--yll-pos-noun-color", settings.highlightNounColor);
+  document.documentElement.style.setProperty("--yll-pos-verb-color", settings.highlightVerbColor);
+  document.documentElement.style.setProperty("--yll-pos-adjective-color", settings.highlightAdjectiveColor);
+  document.documentElement.style.setProperty("--yll-pos-adverb-color", settings.highlightAdverbColor);
 }
 
 function updateModeSelect() {
@@ -556,16 +589,112 @@ function updateModeSelect() {
   if (select) select.value = loadSafeSettings().subtitleMode;
 }
 
-function renderClickableText(text: string) {
-  if (!loadSafeSettings().wordLookupEnabled) return escapeHtml(text);
+const POS_STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "been", "being", "but", "by", "can", "could", "did", "do", "does", "for",
+  "from", "had", "has", "have", "he", "her", "here", "him", "his", "i", "if", "in", "is", "it", "its", "me", "my",
+  "of", "on", "or", "our", "she", "so", "than", "that", "the", "their", "them", "then", "there", "these", "they",
+  "this", "those", "to", "us", "was", "we", "were", "what", "when", "where", "which", "who", "will", "with", "would",
+  "you", "your", "well", "ve", "re", "ll", "m"
+]);
+
+const POS_NOUN_WORDS = new Set([
+  "america", "art", "day", "everything", "everybody", "excuse", "excuses", "form", "laughter", "misery", "nation",
+  "negativity", "october", "one", "politics", "sport", "sunshine", "time", "u", "uk", "weather", "world"
+]);
+
+const POS_VERB_WORDS = new Set([
+  "already", "complain", "complaining", "know", "listen", "pass", "point", "pointed", "read", "said", "say", "seeing",
+  "spreading", "talk", "went"
+]);
+
+const POS_ADJECTIVE_WORDS = new Set([
+  "another", "dreadful", "hard", "national", "negative", "viral"
+]);
+
+const POS_ADVERB_WORDS = new Set([
+  "actually", "already", "else", "maybe", "today"
+]);
+
+function tokenForPartOfSpeech(word: string) {
+  return word
+    .toLowerCase()
+    .replace(/^[^a-z]+|[^a-z]+$/g, "")
+    .replace(/'s$/g, "")
+    .replace(/'{2,}/g, "'");
+}
+
+function partOfSpeechForWord(word: string): HighlightPartOfSpeech | undefined {
+  const token = tokenForPartOfSpeech(word);
+  if (token.length < 3 || POS_STOP_WORDS.has(token) || /^\d+$/.test(token)) return undefined;
+  if (POS_ADVERB_WORDS.has(token) || token.endsWith("ly")) return "adverb";
+  if (
+    POS_ADJECTIVE_WORDS.has(token) ||
+    /(?:able|ible|al|ary|ful|ic|ical|ish|ive|less|ous|y)$/.test(token)
+  ) {
+    return "adjective";
+  }
+  if (
+    POS_VERB_WORDS.has(token) ||
+    ((token.endsWith("ing") || token.endsWith("ed")) && !POS_NOUN_WORDS.has(token))
+  ) {
+    return "verb";
+  }
+  if (
+    POS_NOUN_WORDS.has(token) ||
+    /(?:age|ance|ence|er|hood|ism|ist|ity|ment|ness|ship|sion|tion)$/.test(token)
+  ) {
+    return "noun";
+  }
+  return "noun";
+}
+
+function partOfSpeechEnabled(settings: SafeSettings, part: HighlightPartOfSpeech) {
+  if (!settings.partOfSpeechHighlightEnabled) return false;
+  if (part === "noun") return settings.highlightNounEnabled;
+  if (part === "verb") return settings.highlightVerbEnabled;
+  if (part === "adjective") return settings.highlightAdjectiveEnabled;
+  return settings.highlightAdverbEnabled;
+}
+
+function partOfSpeechColor(settings: SafeSettings, part: HighlightPartOfSpeech) {
+  if (part === "noun") return settings.highlightNounColor;
+  if (part === "verb") return settings.highlightVerbColor;
+  if (part === "adjective") return settings.highlightAdjectiveColor;
+  return settings.highlightAdverbColor;
+}
+
+function posHighlightMeta(word: string, settings: SafeSettings) {
+  const part = partOfSpeechForWord(word);
+  if (!part || !partOfSpeechEnabled(settings, part)) return undefined;
+  const color = partOfSpeechColor(settings, part);
+  return {
+    part,
+    color,
+    background: rgbaFromHex(color, 70),
+    mutedBackground: rgbaFromHex(color, 24)
+  };
+}
+
+function posHighlightAttributes(word: string, settings: SafeSettings) {
+  const meta = posHighlightMeta(word, settings);
+  if (!meta) return { className: "", attributes: "" };
+  return {
+    className: ` is-pos is-pos-${meta.part}`,
+    attributes: ` data-pos="${meta.part}" style="--yll-word-pos-color:${meta.color};--yll-word-pos-bg:${meta.background};--yll-word-pos-muted:${meta.mutedBackground}"`
+  };
+}
+
+function renderClickableText(text: string, settings = loadSafeSettings()) {
+  if (!settings.wordLookupEnabled) return escapeHtml(text);
   const pattern = /(\p{L}[\p{L}\p{M}'-]*|\p{N}+)/gu;
   let output = "";
   let lastIndex = 0;
   for (const match of text.matchAll(pattern)) {
     const word = match[0];
     const index = match.index ?? 0;
+    const pos = posHighlightAttributes(word, settings);
     output += escapeHtml(text.slice(lastIndex, index));
-    output += `<span class="yll-word" role="button" tabindex="0" data-word="${escapeHtml(word)}">${escapeHtml(word)}</span>`;
+    output += `<span class="yll-word${pos.className}" role="button" tabindex="0" data-word="${escapeHtml(word)}"${pos.attributes}>${escapeHtml(word)}</span>`;
     lastIndex = index + word.length;
   }
   output += escapeHtml(text.slice(lastIndex));
@@ -585,8 +714,9 @@ function renderOverlaySourceText(cue: LabCue, settings: SafeSettings) {
   words.forEach((match, index) => {
     const word = match[0];
     const start = match.index ?? 0;
+    const pos = posHighlightAttributes(word, settings);
     output += escapeHtml(cue.text.slice(lastIndex, start));
-    output += `<span class="yll-overlay-word ${index === activeWordIndex ? "is-current" : ""}" role="button" tabindex="0" data-word="${escapeHtml(word)}" data-start="${cue.startMs}">${escapeHtml(word)}</span>`;
+    output += `<span class="yll-overlay-word${pos.className} ${index === activeWordIndex ? "is-current" : ""}" role="button" tabindex="0" data-word="${escapeHtml(word)}" data-start="${cue.startMs}"${pos.attributes}>${escapeHtml(word)}</span>`;
     lastIndex = start + word.length;
   });
   output += escapeHtml(cue.text.slice(lastIndex));
@@ -1038,12 +1168,18 @@ function installStyle() {
     }
     #${LIST_ID} .yll-word {
       border-radius: 3px;
+      padding: 0 2px;
       cursor: help;
+    }
+    #${LIST_ID} .yll-word.is-pos {
+      color: #f7f8f8;
+      background: var(--yll-word-pos-muted, rgba(255,255,255,.08));
+      box-shadow: inset 0 -1px 0 var(--yll-word-pos-color, var(--yll-highlight-color, #ffc857));
     }
     #${LIST_ID} .yll-word:hover,
     #${LIST_ID} .yll-word:focus {
       color: #111;
-      background: var(--yll-highlight-color, #ffc857);
+      background: var(--yll-word-pos-color, var(--yll-highlight-color, #ffc857));
       outline: none;
     }
     #${WORD_POPOVER_ID} {
@@ -1060,6 +1196,7 @@ function installStyle() {
       border-radius: 8px;
       box-shadow: 0 12px 30px rgba(0,0,0,.32);
       font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      pointer-events: auto;
     }
     #${WORD_POPOVER_ID} strong { display: block; margin-bottom: 4px; color: #ffc857; }
     #${WORD_POPOVER_ID} p { margin: 0; color: #d7dbe1; }
@@ -1247,6 +1384,7 @@ function installStyle() {
       border-radius: 8px;
     }
     #${SETTINGS_PANEL_ID} .yll-pos-grid label {
+      grid-template-columns: 1fr auto auto;
       min-height: 34px;
       padding: 4px 0;
     }
@@ -1257,6 +1395,13 @@ function installStyle() {
       margin-left: 8px;
       border-radius: 4px;
       vertical-align: -3px;
+    }
+    #${SETTINGS_PANEL_ID} .yll-pos-grid input[type="color"] {
+      width: 22px;
+      height: 22px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
     }
     #${SETTINGS_PANEL_ID} .yll-setting-value { color: #ffc857; font-variant-numeric: tabular-nums; }
     #${SETTINGS_PANEL_ID} .yll-preview-box {
@@ -1272,6 +1417,12 @@ function installStyle() {
       line-height: 1.35;
     }
     #${SETTINGS_PANEL_ID} .yll-preview-box span { color: var(--yll-preview-highlight, #ff006e); background: rgba(255,255,255,.08); padding: 0 4px; }
+    #${SETTINGS_PANEL_ID} .yll-preview-box .yll-preview-pos {
+      color: #fff;
+      background: var(--yll-preview-pos-color, var(--yll-preview-highlight, #ff006e));
+      border-radius: 4px;
+      padding: 0 5px;
+    }
     #${LIBRARY_PANEL_ID} {
       flex: 1 1 auto;
       min-height: 0;
@@ -1846,6 +1997,7 @@ function installStyle() {
       text-shadow: 0 1px 2px rgba(0,0,0,.7);
       pointer-events: none;
       opacity: 0;
+      transition: opacity .12s ease;
     }
     #${OVERLAY_ID}.is-visible { opacity: 1; }
     #${OVERLAY_ID} .yll-overlay-source {
@@ -1858,17 +2010,23 @@ function installStyle() {
       padding: 0 2px;
       pointer-events: auto;
       cursor: help;
+      transition: background .08s ease, color .08s ease;
+    }
+    #${OVERLAY_ID} .yll-overlay-word.is-pos {
+      color: #fff;
+      background: var(--yll-word-pos-bg, rgba(255,255,255,.12));
+      text-shadow: none;
     }
     #${OVERLAY_ID} .yll-overlay-word:hover,
     #${OVERLAY_ID} .yll-overlay-word:focus {
       color: #121212;
-      background: var(--yll-highlight-color, #ffe08a);
+      background: var(--yll-word-pos-color, var(--yll-highlight-color, #ffe08a));
       text-shadow: none;
       outline: none;
     }
     #${OVERLAY_ID} .yll-overlay-word.is-current {
       color: #121212;
-      background: var(--yll-highlight-color, #ffc857);
+      background: var(--yll-word-pos-color, var(--yll-highlight-color, #ffc857));
       text-shadow: none;
     }
     #${OVERLAY_ID} .yll-overlay-translation {
@@ -2041,6 +2199,7 @@ function setStatus(text: string) {
 }
 
 function setCaptionStatus(text: string, sourceLabel?: string) {
+  if (/正在读取官方字幕轨道/.test(text) && hasFinalOfficialRows()) return;
   const status = document.getElementById(STATUS_ID);
   if (!status) return;
   const badge = sourceLabel ? captionSourceBadge(sourceLabel) : "";
@@ -2051,6 +2210,7 @@ function setCaptionStatus(text: string, sourceLabel?: string) {
 
 function captionSourceText(sourceLabel: string) {
   if (/页面字幕|采集|visible/i.test(sourceLabel)) return "页面采集";
+  if (/临时|temporary|partial/i.test(sourceLabel)) return "临时";
   if (/Transcript|transcript/i.test(sourceLabel)) return "Transcript";
   if (/textTracks/i.test(sourceLabel)) return "官方";
   if (/timedtext/i.test(sourceLabel)) return "TimedText";
@@ -2978,12 +3138,12 @@ function mountWordPopover() {
 function showWordPopover(word: string, message: string, options: { canSave?: boolean; startMs?: number; meaning?: string; anchor?: DOMRect } = {}) {
   const popover = mountWordPopover();
   popover.hidden = false;
-  positionWordPopover(popover, options.anchor);
   popover.innerHTML = `
     <strong>${escapeHtml(word)}</strong>
     <p>${escapeHtml(message)}</p>
     ${options.canSave ? `<button type="button" data-save-vocab data-word="${escapeHtml(word)}" data-start="${options.startMs ?? 0}" data-meaning="${escapeHtml(options.meaning ?? "")}">收藏单词</button>` : ""}
   `;
+  positionWordPopover(popover, options.anchor);
   popover.querySelector<HTMLElement>("[data-save-vocab]")?.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3003,8 +3163,33 @@ function positionWordPopover(popover: HTMLElement, anchor?: DOMRect) {
     return;
   }
   const width = Math.min(260, Math.max(220, window.innerWidth - 24));
-  const left = Math.min(window.innerWidth - width - 12, Math.max(12, anchor.left + anchor.width / 2 - width / 2));
-  const top = Math.max(12, anchor.top - 12 - 88);
+  const overlayRect = document.getElementById(OVERLAY_ID)?.getBoundingClientRect();
+  const popoverHeight = Math.max(96, Math.ceil(popover.getBoundingClientRect().height || popover.offsetHeight || 0));
+  const gap = overlayRect ? 34 : 14;
+  const anchorInsideOverlay = Boolean(
+    overlayRect &&
+    anchor.bottom >= overlayRect.top - 4 &&
+    anchor.top <= overlayRect.bottom + 4 &&
+    anchor.right >= overlayRect.left - 4 &&
+    anchor.left <= overlayRect.right + 4
+  );
+  const horizontalCenter = anchorInsideOverlay && overlayRect
+    ? Math.min(Math.max(anchor.left + anchor.width / 2, overlayRect.left + width / 2), overlayRect.right - width / 2)
+    : anchor.left + anchor.width / 2;
+  const left = Math.min(window.innerWidth - width - 12, Math.max(12, horizontalCenter - width / 2));
+  const avoidRect = anchorInsideOverlay && overlayRect ? overlayRect : undefined;
+  const avoidTop = avoidRect?.top ?? Math.min(anchor.top, overlayRect?.top ?? anchor.top);
+  const avoidBottom = avoidRect?.bottom ?? (overlayRect?.bottom ?? anchor.bottom);
+  const aboveTop = avoidTop - popoverHeight - gap;
+  const belowTop = avoidBottom + gap;
+  let top = aboveTop >= 12
+    ? aboveTop
+    : belowTop + popoverHeight <= window.innerHeight - 12
+      ? belowTop
+      : Math.max(12, Math.min(window.innerHeight - popoverHeight - 12, aboveTop));
+  if (overlayRect && top + popoverHeight > overlayRect.top - 18 && aboveTop >= 12) {
+    top = aboveTop;
+  }
   popover.style.width = `${width}px`;
   popover.style.left = `${left}px`;
   popover.style.top = `${top}px`;
@@ -3292,8 +3477,8 @@ function highlightSettingsPanelHtml(settings: SafeSettings) {
     <div class="yll-settings-group">
       <h4>词性标注</h4>
       <label>
-        <span>启用<small>后续会按词性显示更细的标注颜色。</small></span>
-        <input type="checkbox" data-setting="wordProgressEnabled" ${settings.wordProgressEnabled ? "checked" : ""}>
+        <span>启用<small>按词性显示更细的标注颜色。</small></span>
+        <input type="checkbox" data-setting="partOfSpeechHighlightEnabled" ${settings.partOfSpeechHighlightEnabled ? "checked" : ""}>
       </label>
       <label>
         <span>是否显示词卡</span>
@@ -3301,21 +3486,37 @@ function highlightSettingsPanelHtml(settings: SafeSettings) {
       </label>
       <label>
         <span>高亮内容</span>
-        <select data-setting="wordAnnotationEnabled">
-          <option value="true" ${settings.wordAnnotationEnabled ? "selected" : ""}>自定义</option>
-          <option value="false" ${!settings.wordAnnotationEnabled ? "selected" : ""}>关闭</option>
+        <select data-setting="partOfSpeechHighlightEnabled">
+          <option value="true" ${settings.partOfSpeechHighlightEnabled ? "selected" : ""}>自定义</option>
+          <option value="false" ${!settings.partOfSpeechHighlightEnabled ? "selected" : ""}>关闭</option>
         </select>
       </label>
       <div class="yll-pos-grid">
-        <label><span>名词 <i style="background:#f33478"></i></span><input type="checkbox" checked disabled></label>
-        <label><span>动词 <i style="background:#7f57d8"></i></span><input type="checkbox" checked disabled></label>
-        <label><span>形容词 <i style="background:#42bbc1"></i></span><input type="checkbox" checked disabled></label>
-        <label><span>副词 <i style="background:#43c000"></i></span><input type="checkbox" checked disabled></label>
+        <label>
+          <span>名词 <i style="background:var(--yll-pos-noun-color)"></i></span>
+          <input type="color" data-setting="highlightNounColor" value="${settings.highlightNounColor}">
+          <input type="checkbox" data-setting="highlightNounEnabled" ${settings.highlightNounEnabled ? "checked" : ""}>
+        </label>
+        <label>
+          <span>动词 <i style="background:var(--yll-pos-verb-color)"></i></span>
+          <input type="color" data-setting="highlightVerbColor" value="${settings.highlightVerbColor}">
+          <input type="checkbox" data-setting="highlightVerbEnabled" ${settings.highlightVerbEnabled ? "checked" : ""}>
+        </label>
+        <label>
+          <span>形容词 <i style="background:var(--yll-pos-adjective-color)"></i></span>
+          <input type="color" data-setting="highlightAdjectiveColor" value="${settings.highlightAdjectiveColor}">
+          <input type="checkbox" data-setting="highlightAdjectiveEnabled" ${settings.highlightAdjectiveEnabled ? "checked" : ""}>
+        </label>
+        <label>
+          <span>副词 <i style="background:var(--yll-pos-adverb-color)"></i></span>
+          <input type="color" data-setting="highlightAdverbColor" value="${settings.highlightAdverbColor}">
+          <input type="checkbox" data-setting="highlightAdverbEnabled" ${settings.highlightAdverbEnabled ? "checked" : ""}>
+        </label>
       </div>
     </div>
     <div class="yll-settings-group">
       <h4>预览</h4>
-      <div class="yll-preview-box" style="background:${settings.overlayBackgroundColor};color:${settings.sourceColor};font-family:${cssFontFamily(settings.sourceFontFamily)}">You can <span style="color:${settings.highlightColor}">read</span><br>the demo content<br><em style="color:${settings.translationColor};font-family:${cssFontFamily(settings.translationFontFamily)}">您可以查看示例内容</em></div>
+      <div class="yll-preview-box" style="background:${settings.overlayBackgroundColor};color:${settings.sourceColor};font-family:${cssFontFamily(settings.sourceFontFamily)}">You can <span class="yll-preview-pos" style="--yll-preview-pos-color:var(--yll-pos-verb-color)">read</span><br>the <span class="yll-preview-pos" style="--yll-preview-pos-color:var(--yll-pos-adjective-color)">demo</span> <span class="yll-preview-pos" style="--yll-preview-pos-color:var(--yll-pos-noun-color)">content</span><br><span class="yll-preview-pos" style="--yll-preview-pos-color:var(--yll-pos-adverb-color)">quickly</span><br><em style="color:${settings.translationColor};font-family:${cssFontFamily(settings.translationFontFamily)}">您可以查看示例内容</em></div>
     </div>
     <button class="yll-settings-reset" type="button" data-settings-reset>恢复默认设置</button>
   `;
@@ -3847,12 +4048,29 @@ function positionOverlay() {
   overlay.style.fontSize = `${settings.overlayFontSize}px`;
 }
 
+function overlayCueSignature(cue: LabCue, settings: SafeSettings) {
+  return [
+    cueKey(cue),
+    cue.text,
+    cue.translatedText ?? "",
+    settings.subtitleMode,
+    settings.showTranslations ? "translations-on" : "translations-off",
+    settings.highlightCurrentWord ? "highlight-on" : "highlight-off",
+    settings.partOfSpeechHighlightEnabled ? "pos-on" : "pos-off",
+    settings.highlightNounEnabled ? `noun:${settings.highlightNounColor}` : "noun-off",
+    settings.highlightVerbEnabled ? `verb:${settings.highlightVerbColor}` : "verb-off",
+    settings.highlightAdjectiveEnabled ? `adj:${settings.highlightAdjectiveColor}` : "adj-off",
+    settings.highlightAdverbEnabled ? `adv:${settings.highlightAdverbColor}` : "adv-off"
+  ].join("||");
+}
+
 function setOverlayCue(cue?: LabCue) {
   const overlay = mountOverlay();
   positionOverlay();
   if (!cue?.text) {
     overlay.innerHTML = "";
     overlay.classList.remove("is-visible");
+    runtime.__yllSafeOverlayRenderedSignature = undefined;
     return;
   }
   const translation = cue.translatedText?.trim();
@@ -3867,12 +4085,31 @@ function setOverlayCue(cue?: LabCue) {
   overlay.style.setProperty("--yll-translation-color", settings.translationColor);
   overlay.style.setProperty("--yll-highlight-color", settings.highlightColor);
   overlay.style.setProperty("--yll-translation-size", `${settings.translationFontSize}px`);
+  const signature = overlayCueSignature(cue, settings);
+  if (runtime.__yllSafeOverlayRenderedSignature === signature) {
+    syncOverlayCurrentWord(overlay, cue, settings);
+    overlay.classList.add("is-visible");
+    return;
+  }
   overlay.innerHTML = `
     ${showSource ? `<span class="yll-overlay-source">${renderOverlaySourceText(cue, settings)}</span>` : ""}
     ${translationText ? `<span class="yll-overlay-translation">${escapeHtml(translationText)}</span>` : ""}
   `;
+  runtime.__yllSafeOverlayRenderedSignature = signature;
   bindOverlayWordEvents(overlay);
   overlay.classList.add("is-visible");
+}
+
+function syncOverlayCurrentWord(overlay: HTMLElement, cue: LabCue, settings: SafeSettings) {
+  if (!settings.highlightCurrentWord) return;
+  const words = Array.from(cue.text.matchAll(/(\p{L}[\p{L}\p{M}'-]*|\p{N}+)/gu));
+  if (!words.length) return;
+  const video = getMainVideo();
+  const currentMs = video ? wordHighlightCurrentMs(video, settings) : cue.startMs;
+  const activeWordIndex = activeWordIndexForCue(cue, words, currentMs);
+  overlay.querySelectorAll<HTMLElement>(".yll-overlay-word").forEach((element, index) => {
+    element.classList.toggle("is-current", index === activeWordIndex);
+  });
 }
 
 function bindOverlayWordEvents(overlay: HTMLElement) {
@@ -3923,7 +4160,7 @@ function renderRows(rows: LabCue[]) {
         <div class="yll-row${activeClass}" role="button" tabindex="0" data-start="${cue.startMs}" data-key="${escapeHtml(key)}">
           <span class="yll-time">${formatClock(cue.startMs)}</span>
           <span>
-            <span class="yll-text">${renderClickableText(cue.text)}</span>
+            <span class="yll-text">${renderClickableText(cue.text, settings)}</span>
             ${cue.translatedText ? `<span class="yll-translation">${escapeHtml(cue.translatedText)}</span>` : ""}
           </span>
         </div>
@@ -4049,6 +4286,11 @@ function hasOfficialRows(rows = runtime.__yllSafeRows ?? []) {
   return rows.some((cue) => cue.source !== "visible");
 }
 
+function hasFinalOfficialRows(rows = runtime.__yllSafeRows ?? []) {
+  return rows.some((cue) => cue.source !== "visible" && cue.source !== "text-track") ||
+    (runtime.__yllSafeOfficialLockedVideoId === getVideoId() && rows.some((cue) => cue.source === "text-track"));
+}
+
 function isFinalOfficialSourceLabel(sourceLabel: string) {
   return !/临时|temporary|partial/i.test(sourceLabel);
 }
@@ -4072,9 +4314,16 @@ function lockOfficialRowsForCurrentVideo(videoId = getVideoId()) {
   clearStartupOfficialRetries();
 }
 
+function stopOutdatedOfficialLoadIfLocked(videoId = getVideoId()) {
+  if (!videoId || runtime.__yllSafeOfficialLockedVideoId !== videoId || !hasFinalOfficialRows()) return false;
+  runtime.__yllSafeIsLoadingOfficial = false;
+  runtime.__yllSafeLoadingVideoId = undefined;
+  return true;
+}
+
 function scheduleOfficialRetry(delayMs: number, reason: string) {
   const videoId = getVideoId();
-  if (!videoId || hasOfficialRows()) return;
+  if (!videoId || hasFinalOfficialRows()) return;
   scheduleForcedOfficialRetry(delayMs, reason);
 }
 
@@ -4084,6 +4333,10 @@ function scheduleForcedOfficialRetry(delayMs: number, reason: string) {
   clearScheduledOfficialRetry();
   runtime.__yllSafeOfficialRetryTimer = window.setTimeout(() => {
     runtime.__yllSafeOfficialRetryTimer = undefined;
+    if (stopOutdatedOfficialLoadIfLocked(videoId)) {
+      addDebugLog("load:scheduled-retry-skip-official-locked", { reason, videoId });
+      return;
+    }
     if (isYouTubeAdShowing()) {
       addDebugLog("load:scheduled-retry-skip-ad", { reason, videoId });
       scheduleOfficialRetry(2500, reason);
@@ -4105,7 +4358,7 @@ function scheduleStartupOfficialRetries(videoId: string) {
   const delays = [250, 900, 1800, 5200, 11000];
   runtime.__yllSafeStartupRetryTimers = delays.map((delayMs) =>
     window.setTimeout(() => {
-      if (getVideoId() !== videoId || hasOfficialRows()) return;
+      if (getVideoId() !== videoId || stopOutdatedOfficialLoadIfLocked(videoId)) return;
       if (isYouTubeAdShowing()) {
         addDebugLog("load:startup-retry-skip-ad", { videoId, delayMs });
         scheduleOfficialRetry(2500, `startup-after-ad-${delayMs}`);
@@ -5347,7 +5600,7 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
       { label: "srv3", setFormat: "srv3" },
       { label: "vtt", setFormat: "vtt" }
     ];
-    for (const plan of fetchPlans) {
+    const planResults = await Promise.all(fetchPlans.map(async (plan) => {
       const url = new URL(baseUrl, location.href);
       if (plan.setFormat) url.searchParams.set("fmt", plan.setFormat);
       try {
@@ -5355,14 +5608,22 @@ async function loadRowsFromTracks(videoId: string, tracks: RawCaptionTrack[], so
         const body = await fetchCaptionText(url.toString());
         const rows = parseCaptionBody(videoId, body, source).filter((cue) => cue.text && videoId && language);
         addDebugLog("tracks:parsed", { source, language, format: plan.label, body: body.length, rows: rows.length });
-        if (rows.length) return mergeAdjacentCues(rows);
         const tokenHint = captionUrlRequiresPoToken(url) && !body.trim() ? " token-gated exp=xpe" : "";
-        failures.push(`${language}/${plan.label}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`);
+        return {
+          rows,
+          failure: rows.length ? undefined : `${language}/${plan.label}: body=${body.length} parsed=0 host=${url.hostname}${tokenHint}`
+        };
       } catch (error) {
         const tokenHint = captionUrlRequiresPoToken(url) ? " token-gated exp=xpe;" : "";
-        failures.push(`${language}/${plan.label}:${tokenHint} ${toErrorMessage(error)}`);
+        return {
+          rows: [] as LabCue[],
+          failure: `${language}/${plan.label}:${tokenHint} ${toErrorMessage(error)}`
+        };
       }
-    }
+    }));
+    const successfulPlan = planResults.find((result) => result.rows.length);
+    if (successfulPlan) return mergeAdjacentCues(successfulPlan.rows);
+    failures.push(...planResults.map((result) => result.failure).filter((failure): failure is string => Boolean(failure)));
   }
 
   throw new Error(`${source}: tracks=${tracks.length}; ${failures.slice(0, 3).join(" | ") || "no usable baseUrl"}`);
@@ -5376,7 +5637,9 @@ async function loadOfficialRows(videoId: string, options: { includeSlowPaths?: b
       addDebugLog("official:text-track-early-success", { rows: textTrackRows.length });
       return textTrackRows;
     }
-    if (textTrackRows.length) {
+    if (isUsableCurrentTextTrackRows(textTrackRows)) {
+      addDebugLog("official:text-track-early-usable", { rows: textTrackRows.length });
+    } else if (textTrackRows.length) {
       addDebugLog("official:text-track-early-partial", { rows: textTrackRows.length });
     }
   } catch (error) {
@@ -5553,7 +5816,7 @@ async function loadDirectTimedTextRows(videoId: string) {
     const key = `${candidate.languageCode}:${candidate.kind ?? ""}:${candidate.name ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    for (const format of ["json3", "srv3", "vtt"]) {
+    const formatResults = await Promise.all((["json3", "srv3", "vtt"] as const).map(async (format) => {
       const url = new URL("https://www.youtube.com/api/timedtext");
       url.searchParams.set("v", videoId);
       url.searchParams.set("lang", candidate.languageCode);
@@ -5564,17 +5827,26 @@ async function loadDirectTimedTextRows(videoId: string) {
       try {
         const text = await fetchCaptionText(url.toString());
         if (!text.trim()) {
-          failures.push(`${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:empty`);
-          continue;
+          return {
+            rows: [] as LabCue[],
+            failure: `${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:empty`
+          };
         }
         const rows = parseCaptionBody(videoId, text, "timedtext");
-        if (rows.length) return mergeAdjacentCues(rows);
-        failures.push(`${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:parsed=0 body=${text.length}`);
+        return {
+          rows,
+          failure: rows.length ? undefined : `${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:parsed=0 body=${text.length}`
+        };
       } catch (error) {
-        failures.push(`${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:${toErrorMessage(error).slice(0, 120)}`);
-        continue;
+        return {
+          rows: [] as LabCue[],
+          failure: `${candidate.languageCode}/${candidate.kind ?? "manual"}/${format}:${toErrorMessage(error).slice(0, 120)}`
+        };
       }
-    }
+    }));
+    const successfulFormat = formatResults.find((result) => result.rows.length);
+    if (successfulFormat) return mergeAdjacentCues(successfulFormat.rows);
+    failures.push(...formatResults.map((result) => result.failure).filter((failure): failure is string => Boolean(failure)));
   }
   addDebugLog("direct-timedtext:failed", { failures: failures.slice(0, 6) });
   return [];
@@ -5630,17 +5902,27 @@ function isLikelyCompleteTextTrackRows(rows: LabCue[]) {
   const video = getMainVideo();
   const durationMs = video?.duration && Number.isFinite(video.duration) ? video.duration * 1000 : 0;
   if (!durationMs || durationMs < 90000) return rows.length >= 3;
+  const firstStartMs = rows.reduce((min, cue) => Math.min(min, cue.startMs), Number.POSITIVE_INFINITY);
+  const lastEndMs = rows.reduce((max, cue) => Math.max(max, cue.startMs + cue.durationMs), 0);
+  const coverageRatio = lastEndMs / durationMs;
+  const startsNearBeginning = Number.isFinite(firstStartMs) && firstStartMs <= Math.min(120000, durationMs * 0.18);
+  const enoughRowsForLongVideo = rows.length >= Math.min(80, Math.max(18, Math.floor(durationMs / 45000)));
+  return startsNearBeginning && coverageRatio >= 0.55 && enoughRowsForLongVideo;
+}
+
+function isUsableCurrentTextTrackRows(rows: LabCue[]) {
+  if (rows.length < 2) return false;
+  const video = getMainVideo();
+  const durationMs = video?.duration && Number.isFinite(video.duration) ? video.duration * 1000 : 0;
+  if (!durationMs || durationMs < 90000) return rows.length >= 3;
   const currentMs = video && Number.isFinite(video.currentTime) ? video.currentTime * 1000 : 0;
   const firstStartMs = rows.reduce((min, cue) => Math.min(min, cue.startMs), Number.POSITIVE_INFINITY);
   const lastEndMs = rows.reduce((max, cue) => Math.max(max, cue.startMs + cue.durationMs), 0);
-  const coversCurrentSegment =
+  return (
     Number.isFinite(firstStartMs) &&
     firstStartMs <= currentMs + 20000 &&
-    lastEndMs >= Math.max(0, currentMs - 1500);
-  if (coversCurrentSegment && rows.length >= 3) return true;
-  const coverageRatio = lastEndMs / durationMs;
-  const enoughRowsForLongVideo = rows.length >= Math.min(80, Math.max(18, Math.floor(durationMs / 45000)));
-  return coverageRatio >= 0.55 && enoughRowsForLongVideo;
+    lastEndMs >= Math.max(0, currentMs - 1500)
+  );
 }
 
 function readVisibleCaptionCue(allowHiddenCaptions = false) {
@@ -5709,7 +5991,7 @@ function ensureNativeCaptionsForFallback() {
 
 async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: string } = {}) {
   const videoId = getVideoId();
-  if (!videoId || runtime.__yllSafeLoadingVideoId === videoId) return;
+  if (!videoId || (!options.force && runtime.__yllSafeLoadingVideoId === videoId)) return;
   if (isYouTubeAdShowing()) {
     runtime.__yllSafeIsLoadingOfficial = false;
     runtime.__yllSafeLoadingVideoId = undefined;
@@ -5720,8 +6002,9 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
   }
   const rows = runtime.__yllSafeRows ?? [];
   const hasOfficialRowsForVideo = hasOfficialRows(rows);
-  if (!options.force && runtime.__yllSafeLoadedVideoId === videoId && hasOfficialRowsForVideo) return;
-  if (!options.force && runtime.__yllSafeOfficialLockedVideoId === videoId && hasOfficialRowsForVideo) return;
+  const hasFinalOfficialRowsForVideo = hasFinalOfficialRows(rows);
+  if (runtime.__yllSafeLoadedVideoId === videoId && hasFinalOfficialRowsForVideo) return;
+  if (runtime.__yllSafeOfficialLockedVideoId === videoId && hasFinalOfficialRowsForVideo) return;
   const now = Date.now();
   const hasVisibleRows = rows.some((cue) => cue.source === "visible");
   const retryWindowMs = (hasVisibleRows || runtime.__yllSafeCanUseVisibleFallback) ? OFFICIAL_FALLBACK_RETRY_MS : OFFICIAL_RETRY_MS;
@@ -5745,10 +6028,11 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
     pass: runtime.__yllSafeOfficialAttemptCount,
     existingRows: rows.length,
     hasOfficialRows: hasOfficialRowsForVideo,
+    hasFinalOfficialRows: hasFinalOfficialRowsForVideo,
     force: Boolean(options.force),
     reason: options.reason ?? "poll"
   });
-  if (!rows.length || (options.force && hasOfficialRowsForVideo)) {
+  if (!rows.length) {
     runtime.__yllSafeRows = [];
     runtime.__yllSafeActiveKey = undefined;
     renderRows([]);
@@ -5756,15 +6040,22 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
   if (!hasVisibleRows) {
     document.documentElement.classList.remove("yll-hide-native-captions");
   }
-  setCaptionStatus(`正在读取官方字幕轨道... 第 ${runtime.__yllSafeOfficialAttemptCount} 次`, "官方字幕轨道");
+  const shouldShowOfficialLoadingStatus = !hasOfficialRowsForVideo;
+  if (shouldShowOfficialLoadingStatus) {
+    setCaptionStatus(`正在读取官方字幕轨道... 第 ${runtime.__yllSafeOfficialAttemptCount} 次`, "官方字幕轨道");
+  }
   await ensureTimedTextBridge().catch((error) => {
     runtime.__yllSafeLastFailure = `bridge: ${toErrorMessage(error)}`;
     runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
   });
+  if (stopOutdatedOfficialLoadIfLocked(videoId)) return;
 
   for (let attempt = 0; attempt < OFFICIAL_AUTO_ATTEMPTS; attempt += 1) {
     let partialTextTrackRows: LabCue[] = [];
-    setCaptionStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`, "官方字幕轨道");
+    if (stopOutdatedOfficialLoadIfLocked(videoId)) return;
+    if (shouldShowOfficialLoadingStatus) {
+      setCaptionStatus(`正在读取官方字幕轨道... ${attempt + 1}/${OFFICIAL_AUTO_ATTEMPTS}`, "官方字幕轨道");
+    }
     try {
       const includeSlowPaths = true;
       const attemptTimeoutMs = includeSlowPaths ? OFFICIAL_SLOW_ATTEMPT_TIMEOUT_MS : OFFICIAL_FAST_ATTEMPT_TIMEOUT_MS;
@@ -5794,6 +6085,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
       addDebugLog("load:official-error", { attempt: attempt + 1, error: toErrorMessage(error) });
     }
+    if (stopOutdatedOfficialLoadIfLocked(videoId)) return;
 
     try {
       const textTrackRows = readTextTrackRows();
@@ -5807,7 +6099,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
           addDebugLog("load:text-track-success", { rows: textTrackRows.length });
           return;
         }
-        partialTextTrackRows = textTrackRows;
+        if (isUsableCurrentTextTrackRows(textTrackRows)) partialTextTrackRows = textTrackRows;
         runtime.__yllSafeLastOfficialDebug?.push(`textTracks partial:${textTrackRows.length}`);
         addDebugLog("load:text-track-partial", {
           rows: textTrackRows.length,
@@ -5818,6 +6110,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
       runtime.__yllSafeLastFailure = `textTracks: ${toErrorMessage(error)}`;
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
+    if (stopOutdatedOfficialLoadIfLocked(videoId)) return;
 
     try {
       const directRows = await loadDirectTimedTextRows(videoId);
@@ -5834,6 +6127,7 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
       runtime.__yllSafeLastFailure = `timedtext: ${toErrorMessage(error)}`;
       runtime.__yllSafeLastOfficialDebug?.push(runtime.__yllSafeLastFailure);
     }
+    if (stopOutdatedOfficialLoadIfLocked(videoId)) return;
 
     if (partialTextTrackRows.length >= 2 && attempt + 1 >= 2 && !(runtime.__yllSafeRows ?? []).length) {
       saveRows(partialTextTrackRows, "video.textTracks 临时");
@@ -5853,13 +6147,16 @@ async function loadRowsForCurrentVideo(options: { force?: boolean; reason?: stri
     await new Promise((resolve) => window.setTimeout(resolve, 600));
   }
 
-  enableVisibleFallback("fallback-enabled");
+  if (stopOutdatedOfficialLoadIfLocked(videoId)) return;
+  if (!hasOfficialRows()) {
+    enableVisibleFallback("fallback-enabled");
+  }
   scheduleOfficialRetry(3000, "fallback-enabled");
 }
 
 function enableVisibleFallback(reason: string) {
-  runtime.__yllSafeIsLoadingOfficial = false;
-  runtime.__yllSafeLoadingVideoId = undefined;
+  runtime.__yllSafeIsLoadingOfficial = true;
+  runtime.__yllSafeLoadingVideoId = getVideoId() || runtime.__yllSafeLoadingVideoId;
   runtime.__yllSafeCanUseVisibleFallback = true;
   runtime.__yllSafeLastOfficialFailureAt = Date.now();
   ensureNativeCaptionsForFallback();

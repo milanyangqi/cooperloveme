@@ -1,6 +1,6 @@
 {
   "name": "youtube-language-lab-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A YouTube-first language learning browser extension with subtitles, practice mode, local library, and V2-ready account entitlements.",
   "type": "module",

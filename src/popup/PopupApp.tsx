@@ -91,6 +91,7 @@ type PreviewWord = PageWord & {
   meaning?: string;
   mastery: number;
   saved: boolean;
+  sentenceSaved: boolean;
 };
 
 type PlaybackRateApplyResult = {
@@ -205,12 +206,22 @@ export function PopupApp() {
     document.documentElement.classList.toggle("yll-dock-popup", isDocked);
     void reloadBootstrap();
     void syncPopupHeightWithCaptionPanel();
+    const pageWordRefreshTimers = [1000, 2500, 5000, 9000].map((delay) =>
+      window.setTimeout(() => {
+        void refreshPageWords();
+      }, delay)
+    );
+    const pageWordRefreshInterval = window.setInterval(() => {
+      void refreshPageWords();
+    }, isDocked ? 4000 : 7000);
     const handleRuntimeMessage = (message: { type?: string }) => {
       if (message?.type === "LIBRARY_UPDATED") void reloadBootstrap();
     };
     chrome.runtime.onMessage.addListener(handleRuntimeMessage);
     return () => {
       document.documentElement.classList.remove("yll-dock-popup");
+      pageWordRefreshTimers.forEach((timer) => window.clearTimeout(timer));
+      window.clearInterval(pageWordRefreshInterval);
       chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     };
   }, [isDocked]);
@@ -725,25 +736,38 @@ export function PopupApp() {
       setStatus("这个单词没有对应的字幕句子。");
       return;
     }
-    const response = await sendRuntimeMessage<SentencePreview>({
-      type: "SAVE_SENTENCE",
-      payload: {
-        videoId: activePageVideoId || "unknown",
-        cueId: `page-word:${normalizePreviewWord(word.text)}`,
-        text,
-        translatedText: word.translatedSentence,
-        language: "en",
-        startMs: 0,
-        durationMs: 0,
-        isFavorite: true
+    const key = `${word.text}:sentence`;
+    try {
+      setWordActionBusy(key);
+      const response = await sendRuntimeMessage<SentencePreview>({
+        type: "SAVE_SENTENCE",
+        payload: {
+          videoId: activePageVideoId || "unknown",
+          cueId: `page-word:${normalizePreviewWord(word.text)}`,
+          text,
+          translatedText: word.translatedSentence,
+          language: "en",
+          startMs: 0,
+          durationMs: 0,
+          isFavorite: true
+        }
+      });
+      if (!response.ok) {
+        setStatus(response.error);
+        return;
       }
-    });
-    if (!response.ok) {
-      setStatus(response.error);
-      return;
+      setBootstrap((current) => {
+        if (!current) return current;
+        const sentenceNotes = current.library.sentenceNotes as SentencePreview[];
+        const exists = sentenceNotes.some((item) => normalizePreviewSentence(item.text ?? "") === normalizePreviewSentence(response.data.text ?? text));
+        const nextSentences = exists ? sentenceNotes : [response.data, ...sentenceNotes];
+        return { ...current, library: { ...current.library, sentenceNotes: nextSentences } };
+      });
+      setStatus("该句已收藏。");
+      await reloadBootstrap();
+    } finally {
+      setWordActionBusy("");
     }
-    setStatus("该句已收藏。");
-    await reloadBootstrap();
   };
 
   const addSiteRule = async () => {
@@ -804,6 +828,7 @@ export function PopupApp() {
   const masteredCount = vocabItems.filter((item) => item.mastery && item.mastery >= 4).length;
   const recentSentences = sentenceNotes.slice(0, 4);
   const savedByKey = new Map(vocabItems.map((item) => [normalizePreviewWord(item.normalizedText ?? item.text ?? ""), item]));
+  const savedSentenceKeys = new Set(sentenceNotes.map((item) => normalizePreviewSentence(item.text ?? "")).filter(Boolean));
   const currentPageWords: PreviewWord[] = pageWords
     .map((word) => {
       const saved = savedByKey.get(normalizePreviewWord(word.text));
@@ -812,7 +837,8 @@ export function PopupApp() {
         id: saved?.id,
         meaning: saved?.meaning,
         mastery: saved?.mastery ?? 0,
-        saved: Boolean(saved)
+        saved: Boolean(saved),
+        sentenceSaved: savedSentenceKeys.has(normalizePreviewSentence(word.sourceSentence ?? ""))
       };
     })
     .filter((word) => normalizePreviewWord(word.text));
@@ -1422,6 +1448,8 @@ function PreviewWordRow({
 }) {
   const saveBusy = busyKey === `${item.text}:0`;
   const masterBusy = busyKey === `${item.text}:5`;
+  const sentenceBusy = busyKey === `${item.text}:sentence`;
+  const mastered = item.mastery >= 4;
   return (
     <div className="word-row">
       <button className="word-row-main" type="button" onClick={onOpen}>
@@ -1432,17 +1460,38 @@ function PreviewWordRow({
         <ChevronRight size={15} />
       </button>
       <div className="word-row-actions">
-        <button type="button" onClick={onSave} disabled={saveBusy || masterBusy} title={saveLabel === "生词" ? "加入本页生词/生词库" : "已在生词库"}>
-          <Heart size={14} />
+        <button
+          className={`word-action-save${item.saved ? " is-saved" : ""}${saveBusy ? " is-busy" : ""}`}
+          type="button"
+          onClick={onSave}
+          disabled={saveBusy || masterBusy || sentenceBusy}
+          title={item.saved ? "已在生词库" : "加入本页生词/生词库"}
+          aria-pressed={item.saved}
+        >
+          <Heart size={14} fill={item.saved ? "currentColor" : "none"} />
           <span>{saveLabel}</span>
         </button>
-        <button type="button" onClick={onMaster} disabled={saveBusy || masterBusy} title="标记为已掌握">
-          <CheckCircle2 size={14} />
-          <span>掌握</span>
+        <button
+          className={`word-action-master${mastered ? " is-mastered" : ""}${masterBusy ? " is-busy" : ""}`}
+          type="button"
+          onClick={onMaster}
+          disabled={saveBusy || masterBusy || sentenceBusy}
+          title={mastered ? "已标记为掌握" : "标记为已掌握"}
+          aria-pressed={mastered}
+        >
+          <CheckCircle2 size={14} fill={mastered ? "currentColor" : "none"} />
+          <span>{mastered ? "已掌握" : "掌握"}</span>
         </button>
-        <button type="button" onClick={onSaveSentence} disabled={!item.sourceSentence} title="收藏该单词所在字幕句">
-          <BookMarked size={14} />
-          <span>收藏句</span>
+        <button
+          className={`word-action-sentence${item.sentenceSaved ? " is-sentence-saved" : ""}${sentenceBusy ? " is-busy" : ""}`}
+          type="button"
+          onClick={onSaveSentence}
+          disabled={!item.sourceSentence || saveBusy || masterBusy || sentenceBusy}
+          title={item.sentenceSaved ? "该字幕句已收藏" : "收藏该单词所在字幕句"}
+          aria-pressed={item.sentenceSaved}
+        >
+          <BookMarked size={14} fill={item.sentenceSaved ? "currentColor" : "none"} />
+          <span>{item.sentenceSaved ? "已收藏句" : "收藏句"}</span>
         </button>
       </div>
     </div>
@@ -1450,6 +1499,10 @@ function PreviewWordRow({
 }
 
 function normalizePreviewWord(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizePreviewSentence(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
